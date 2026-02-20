@@ -1,0 +1,44 @@
+# cTrade Default Configuration
+# These values are overridden by environment variables and .env file
+
+[app]
+name = "cTrade"
+debug = false
+log_level = "INFO"
+api_host = "127.0.0.1"
+api_port = 8000
+
+[db]
+url = "postgresql+asyncpg://ctrade:ctrade@localhost:5432/ctrade"
+pool_size = 10
+echo_sql = false
+
+[redis]
+url = "redis://localhost:6379/0"
+
+[trading]
+mode = "paper"
+default_quote_currency = "USDT"
+max_open_positions = 5
+order_timeout_seconds = 60
+
+[risk]
+max_position_pct = 0.10
+max_daily_loss_pct = 0.05
+max_drawdown_pct = 0.15
+default_stop_loss_pct = 0.03
+default_take_profit_pct = 0.06
+
+[strategy]
+active_strategy = "combined"
+technical_weight = 0.50
+sentiment_weight = 0.30
+onchain_weight = 0.20
+entry_confidence_threshold = 0.70
+exit_confidence_threshold = 0.30
+
+[feeds]
+news_poll_interval_seconds = 300
+social_poll_interval_seconds = 300
+onchain_poll_interval_seconds = 900
+candle_poll_interval_seconds = 60

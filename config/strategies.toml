@@ -1,0 +1,31 @@
+# Strategy Parameter Defaults
+
+[combined]
+description = "Combined Technical + Sentiment + On-Chain strategy"
+
+[combined.technical]
+rsi_period = 14
+rsi_overbought = 70.0
+rsi_oversold = 30.0
+macd_fast = 12
+macd_slow = 26
+macd_signal = 9
+bb_period = 20
+bb_std = 2.0
+sma_short = 20
+sma_long = 50
+ema_short = 12
+ema_long = 26
+
+[combined.sentiment]
+min_articles_for_signal = 3
+time_decay_hours = 24
+positive_threshold = 0.3
+negative_threshold = -0.3
+source_weights = { news = 0.4, twitter = 0.3, reddit = 0.3 }
+
+[combined.onchain]
+whale_tx_threshold_usd = 1000000
+exchange_netflow_zscore_threshold = 2.0
+nupl_bullish = 0.5
+nupl_bearish = 0.0

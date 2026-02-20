@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: ctrade-postgres
+    environment:
+      POSTGRES_USER: ctrade
+      POSTGRES_PASSWORD: ctrade
+      POSTGRES_DB: ctrade
+    ports:
+      - "5432:5432"
+    volumes:
+      - ctrade_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctrade"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ctrade-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ctrade_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ctrade_pgdata:
+  ctrade_redis:

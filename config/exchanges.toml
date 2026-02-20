@@ -1,0 +1,39 @@
+# Exchange Configuration Templates
+# Per-exchange settings and defaults
+
+[binance]
+exchange_type = "spot"
+rate_limit_rpm = 1200
+default_fee_pct = 0.10
+supports_websocket = true
+testnet_url = "https://testnet.binance.vision"
+
+[coinbase]
+exchange_type = "spot"
+rate_limit_rpm = 600
+default_fee_pct = 0.50
+supports_websocket = true
+
+[kraken]
+exchange_type = "spot"
+rate_limit_rpm = 900
+default_fee_pct = 0.26
+supports_websocket = true
+
+[bybit]
+exchange_type = "both"
+rate_limit_rpm = 600
+default_fee_pct = 0.10
+supports_websocket = true
+
+[okx]
+exchange_type = "both"
+rate_limit_rpm = 600
+default_fee_pct = 0.10
+supports_websocket = true
+
+[kucoin]
+exchange_type = "spot"
+rate_limit_rpm = 600
+default_fee_pct = 0.10
+supports_websocket = true

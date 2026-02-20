@@ -1,0 +1,16 @@
+# Logging Configuration
+
+[logging]
+level = "INFO"
+format = "json"
+console_output = true
+file_output = false
+file_path = "logs/ctrade.log"
+
+# Per-module log levels
+[logging.modules]
+ctrade = "INFO"
+ccxt = "WARNING"
+sqlalchemy = "WARNING"
+uvicorn = "INFO"
+apscheduler = "INFO"
