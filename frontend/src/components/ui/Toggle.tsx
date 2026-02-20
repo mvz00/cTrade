@@ -1,0 +1,57 @@
+import { cn } from '@/lib/cn';
+
+interface ToggleProps {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  activeLabel?: string;
+  inactiveLabel?: string;
+}
+
+export function Toggle({
+  label,
+  description,
+  checked,
+  onChange,
+  activeLabel,
+  inactiveLabel,
+}: ToggleProps) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <div>
+        <p className="text-sm font-medium text-ct-text">{label}</p>
+        {description && <p className="text-xs text-ct-text-dim mt-0.5">{description}</p>}
+      </div>
+      <div className="flex items-center gap-2">
+        {inactiveLabel && (
+          <span className={cn('text-xs font-medium', !checked ? 'text-ct-text' : 'text-ct-text-dim')}>
+            {inactiveLabel}
+          </span>
+        )}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          onClick={() => onChange(!checked)}
+          className={cn(
+            'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+            checked ? 'bg-ct-accent' : 'bg-ct-border'
+          )}
+        >
+          <span
+            className={cn(
+              'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+              checked ? 'translate-x-6' : 'translate-x-1'
+            )}
+          />
+        </button>
+        {activeLabel && (
+          <span className={cn('text-xs font-medium', checked ? 'text-ct-text' : 'text-ct-text-dim')}>
+            {activeLabel}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}

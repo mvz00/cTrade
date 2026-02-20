@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
+from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.core.events import EventBus
 from ctrade.db.engine import close_db, init_db
 from ctrade.settings import AppSettings, get_settings
@@ -38,6 +39,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
 
     logger.info("Starting cTrade v0.1.0...")
+
+    # Initialize runtime config store (must happen before any API calls)
+    RuntimeConfigStore.initialize(settings)
+    logger.info("Runtime config store initialized")
     logger.info("Trading mode: %s", settings.trading.mode)
 
     # Initialize database (non-fatal if unavailable)

@@ -7,6 +7,7 @@ import { ConfigPage } from '@/pages/Configuration/ConfigPage';
 import { SignalsPage } from '@/pages/Signals/SignalsPage';
 import { BacktestPage } from '@/pages/Backtesting/BacktestPage';
 import { AlertsPage } from '@/pages/Alerts/AlertsPage';
+import { ToastProvider } from '@/components/ui/Toast';
 import { ROUTES } from '@/lib/constants';
 
 const queryClient = new QueryClient({
@@ -21,6 +22,7 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>
@@ -34,6 +36,7 @@ export function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

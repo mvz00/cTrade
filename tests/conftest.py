@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from ctrade.api.app import create_app
+from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.core.enums import (
     OrderSide,
     OrderStatus,
@@ -39,6 +40,14 @@ def app_settings() -> AppSettings:
 def event_bus() -> EventBus:
     """Provide a fresh event bus for testing."""
     return EventBus()
+
+
+@pytest.fixture(autouse=True)
+def _init_config_store(app_settings):
+    """Initialize the runtime config store for every test."""
+    RuntimeConfigStore.initialize(app_settings)
+    yield
+    RuntimeConfigStore.reset()
 
 
 @pytest.fixture

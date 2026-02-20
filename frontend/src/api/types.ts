@@ -75,3 +75,53 @@ export interface Order {
   avg_fill_price: number | null;
   created_at: string;
 }
+
+// ---- Mutation request types ----
+
+export interface TradingModeUpdate {
+  mode: 'paper' | 'live';
+}
+
+export interface StrategyConfigUpdate {
+  active_strategy?: string;
+  technical_weight?: number;
+  sentiment_weight?: number;
+  onchain_weight?: number;
+  entry_confidence_threshold?: number;
+  exit_confidence_threshold?: number;
+}
+
+export interface RiskConfigUpdate {
+  max_position_pct?: number;
+  max_daily_loss_pct?: number;
+  max_drawdown_pct?: number;
+  default_stop_loss_pct?: number;
+  default_take_profit_pct?: number;
+}
+
+export interface ExchangeAddRequest {
+  name: string;
+  api_key: string;
+  api_secret: string;
+  passphrase?: string;
+}
+
+export interface ExchangeInfo {
+  id: string;
+  name: string;
+  exchange_type: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ExchangeTestResult {
+  success: boolean;
+  message: string;
+}
+
+export interface AvailableExchange {
+  name: string;
+  exchange_type: string;
+  default_fee_pct: number;
+  supports_websocket: boolean;
+}

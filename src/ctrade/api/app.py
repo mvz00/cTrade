@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from ctrade.api.middleware import setup_middleware
-from ctrade.api.routers import config, dashboard, health
+from ctrade.api.routers import config, dashboard, exchanges, health
 
 # Path to the React build output
 _FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
@@ -38,6 +38,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(config.router, prefix="/api/v1")
+    app.include_router(exchanges.router, prefix="/api/v1")
 
     # Serve React SPA if the build exists, otherwise fall back to landing page
     if _FRONTEND_DIR.is_dir() and (_FRONTEND_DIR / "index.html").exists():

@@ -1,47 +1,69 @@
-"""Configuration API endpoints."""
+"""Configuration API endpoints — read and update runtime config."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, HTTPException
 
-from ctrade.api.deps import get_app_settings
-from ctrade.settings import AppSettings
+from ctrade.api.schemas.config import (
+    RiskConfigResponse,
+    RiskConfigUpdate,
+    StrategyConfigResponse,
+    StrategyConfigUpdate,
+    TradingModeResponse,
+    TradingModeUpdate,
+)
+from ctrade.core.config_store import RuntimeConfigStore
 
 router = APIRouter(prefix="/config", tags=["config"])
 
 
-@router.get("/trading-mode")
-async def get_trading_mode(
-    settings: AppSettings = Depends(get_app_settings),
-) -> dict[str, str]:
+def _store() -> RuntimeConfigStore:
+    return RuntimeConfigStore.get()
+
+
+# ---- Trading Mode ----
+
+@router.get("/trading-mode", response_model=TradingModeResponse)
+async def get_trading_mode() -> TradingModeResponse:
     """Get current trading mode (paper/live)."""
-    return {"mode": settings.trading.mode}
+    return TradingModeResponse(**_store().get_trading())
 
 
-@router.get("/strategy")
-async def get_strategy_config(
-    settings: AppSettings = Depends(get_app_settings),
-) -> dict:
+@router.put("/trading-mode", response_model=TradingModeResponse)
+async def update_trading_mode(body: TradingModeUpdate) -> TradingModeResponse:
+    """Update trading mode."""
+    updated = _store().update_trading(body.model_dump(exclude_none=True))
+    return TradingModeResponse(**updated)
+
+
+# ---- Strategy ----
+
+@router.get("/strategy", response_model=StrategyConfigResponse)
+async def get_strategy_config() -> StrategyConfigResponse:
     """Get current strategy configuration."""
-    return {
-        "active_strategy": settings.strategy.active_strategy,
-        "technical_weight": settings.strategy.technical_weight,
-        "sentiment_weight": settings.strategy.sentiment_weight,
-        "onchain_weight": settings.strategy.onchain_weight,
-        "entry_confidence_threshold": settings.strategy.entry_confidence_threshold,
-        "exit_confidence_threshold": settings.strategy.exit_confidence_threshold,
-    }
+    return StrategyConfigResponse(**_store().get_strategy())
 
 
-@router.get("/risk")
-async def get_risk_config(
-    settings: AppSettings = Depends(get_app_settings),
-) -> dict:
+@router.put("/strategy", response_model=StrategyConfigResponse)
+async def update_strategy_config(body: StrategyConfigUpdate) -> StrategyConfigResponse:
+    """Update strategy configuration. Weights must sum to 1.0."""
+    try:
+        updated = _store().update_strategy(body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return StrategyConfigResponse(**updated)
+
+
+# ---- Risk ----
+
+@router.get("/risk", response_model=RiskConfigResponse)
+async def get_risk_config() -> RiskConfigResponse:
     """Get current risk management configuration."""
-    return {
-        "max_position_pct": settings.risk.max_position_pct,
-        "max_daily_loss_pct": settings.risk.max_daily_loss_pct,
-        "max_drawdown_pct": settings.risk.max_drawdown_pct,
-        "default_stop_loss_pct": settings.risk.default_stop_loss_pct,
-        "default_take_profit_pct": settings.risk.default_take_profit_pct,
-    }
+    return RiskConfigResponse(**_store().get_risk())
+
+
+@router.put("/risk", response_model=RiskConfigResponse)
+async def update_risk_config(body: RiskConfigUpdate) -> RiskConfigResponse:
+    """Update risk management parameters."""
+    updated = _store().update_risk(body.model_dump(exclude_none=True))
+    return RiskConfigResponse(**updated)
