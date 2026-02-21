@@ -138,26 +138,70 @@ class TestSentimentFeedParsing:
     @respx.mock
     @pytest.mark.anyio
     async def test_fetch_reddit(self):
-        respx.get("https://www.reddit.com/r/cryptocurrency/hot.json").mock(
-            return_value=Response(200, json={
-                "data": {
-                    "children": [
-                        {
-                            "data": {
-                                "id": "abc123",
-                                "title": "Bitcoin is looking bullish today!",
-                                "selftext": "",
-                            }
+        """Reddit fetcher tries old.reddit.com first, then www.reddit.com."""
+        reddit_payload = {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "abc123",
+                            "title": "Bitcoin is looking bullish today!",
+                            "selftext": "",
                         }
-                    ]
-                }
-            })
+                    }
+                ]
+            }
+        }
+        respx.get("https://old.reddit.com/r/cryptocurrency/hot.json").mock(
+            return_value=Response(200, json=reddit_payload)
         )
         feed = SentimentFeed.get_instance()
         items = await feed._fetch_reddit()
         assert len(items) >= 1
         assert items[0].source == "reddit"
         assert "BTC" in items[0].assets
+
+    @respx.mock
+    @pytest.mark.anyio
+    async def test_fetch_reddit_fallback(self):
+        """When old.reddit.com fails, falls back to www.reddit.com."""
+        reddit_payload = {
+            "data": {
+                "children": [
+                    {
+                        "data": {
+                            "id": "def456",
+                            "title": "Ethereum merge update",
+                            "selftext": "",
+                        }
+                    }
+                ]
+            }
+        }
+        respx.get("https://old.reddit.com/r/cryptocurrency/hot.json").mock(
+            return_value=Response(403, text="Blocked")
+        )
+        respx.get("https://www.reddit.com/r/cryptocurrency/hot.json").mock(
+            return_value=Response(200, json=reddit_payload)
+        )
+        feed = SentimentFeed.get_instance()
+        items = await feed._fetch_reddit()
+        assert len(items) >= 1
+        assert items[0].source == "reddit"
+
+    @respx.mock
+    @pytest.mark.anyio
+    async def test_fetch_reddit_all_blocked(self):
+        """When all Reddit URLs fail, returns empty list (graceful degradation)."""
+        respx.get("https://old.reddit.com/r/cryptocurrency/hot.json").mock(
+            return_value=Response(403, text="Blocked")
+        )
+        respx.get("https://www.reddit.com/r/cryptocurrency/hot.json").mock(
+            return_value=Response(403, text="Blocked")
+        )
+        feed = SentimentFeed.get_instance()
+        items = await feed._fetch_reddit()
+        assert items == []
 
     @respx.mock
     @pytest.mark.anyio

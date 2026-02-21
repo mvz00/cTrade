@@ -415,42 +415,68 @@ class SentimentFeed:
         return items
 
     async def _fetch_reddit(self) -> list[RawTextItem]:
-        """Fetch hot posts from r/cryptocurrency (public JSON, no auth)."""
+        """Fetch hot posts from r/cryptocurrency (public JSON, no auth).
+
+        Reddit increasingly blocks unauthenticated JSON requests (403).
+        We try the ``old.reddit.com`` domain first as a more reliable
+        alternative, then fall back to ``www.reddit.com``.  If both fail
+        we log a warning and return an empty list instead of raising so
+        the other two sources can still contribute data.
+        """
+        _REDDIT_URLS = [
+            "https://old.reddit.com/r/cryptocurrency/hot.json?limit=25",
+            _REDDIT_HOT_URL,
+        ]
         items: list[RawTextItem] = []
-        try:
-            async with httpx.AsyncClient(
-                timeout=15.0,
-                headers={"User-Agent": "cTrade/0.1.0 (crypto trading bot)"},
-            ) as client:
-                resp = await client.get(_REDDIT_HOT_URL)
-                resp.raise_for_status()
-                data = resp.json()
+        last_exc: Exception | None = None
 
-            for child in data.get("data", {}).get("children", []):
-                post = child.get("data", {})
-                title = post.get("title", "")
-                selftext = post.get("selftext", "")[:200]
-                post_id = post.get("id", "")
+        for url in _REDDIT_URLS:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=15.0,
+                    headers={
+                        "User-Agent": "cTrade:v0.1.0 (by /u/cTrade_bot)",
+                        "Accept": "application/json",
+                    },
+                    follow_redirects=True,
+                ) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    data = resp.json()
 
-                if not title:
-                    continue
+                for child in data.get("data", {}).get("children", []):
+                    post = child.get("data", {})
+                    title = post.get("title", "")
+                    selftext = post.get("selftext", "")[:200]
+                    post_id = post.get("id", "")
 
-                text = f"{title}. {selftext}" if selftext else title
-                source_id = f"reddit_{post_id}"
-                assets = self._extract_assets(text)
+                    if not title:
+                        continue
 
-                if assets:
-                    items.append(RawTextItem(
-                        text=text[:500],
-                        source="reddit",
-                        source_id=source_id,
-                        assets=assets,
-                    ))
-        except Exception as exc:
-            logger.debug("Reddit fetch error: %s", exc)
-            raise
+                    text = f"{title}. {selftext}" if selftext else title
+                    source_id = f"reddit_{post_id}"
+                    assets = self._extract_assets(text)
 
-        return items
+                    if assets:
+                        items.append(RawTextItem(
+                            text=text[:500],
+                            source="reddit",
+                            source_id=source_id,
+                            assets=assets,
+                        ))
+                return items  # success — stop trying other URLs
+            except Exception as exc:
+                last_exc = exc
+                logger.debug("Reddit fetch failed (%s): %s", url, exc)
+                continue
+
+        # All Reddit URLs failed — degrade gracefully
+        logger.info(
+            "Reddit source unavailable (all URLs returned errors). "
+            "Sentiment will rely on CryptoCompare and CoinGecko. Last error: %s",
+            last_exc,
+        )
+        return []
 
     # ---- Helpers ----
 
