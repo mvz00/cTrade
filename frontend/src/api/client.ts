@@ -37,7 +37,17 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(body?.detail ?? `API error: ${res.status} ${res.statusText}`);
+    let msg = `API error: ${res.status} ${res.statusText}`;
+    if (body?.detail) {
+      if (typeof body.detail === 'string') {
+        msg = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        msg = body.detail.map((e: { msg?: string; loc?: string[] }) =>
+          e.msg ? `${e.loc?.slice(-1)?.[0] ?? 'field'}: ${e.msg}` : JSON.stringify(e)
+        ).join('; ');
+      }
+    }
+    throw new Error(msg);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
