@@ -8,6 +8,7 @@ import { SignalsPage } from '@/pages/Signals/SignalsPage';
 import { BacktestPage } from '@/pages/Backtesting/BacktestPage';
 import { AlertsPage } from '@/pages/Alerts/AlertsPage';
 import { ScreenerPage } from '@/pages/Screener/ScreenerPage';
+import { IntelligencePage } from '@/pages/Intelligence/IntelligencePage';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ROUTES } from '@/lib/constants';
 
@@ -32,6 +33,7 @@ export function App() {
             <Route path={ROUTES.TRADING} element={<TradingPage />} />
             <Route path={ROUTES.CONFIGURATION} element={<ConfigPage />} />
             <Route path={ROUTES.SIGNALS} element={<SignalsPage />} />
+            <Route path={ROUTES.INTELLIGENCE} element={<IntelligencePage />} />
             <Route path={ROUTES.SCREENER} element={<ScreenerPage />} />
             <Route path={ROUTES.BACKTESTING} element={<BacktestPage />} />
             <Route path={ROUTES.ALERTS} element={<AlertsPage />} />

@@ -276,6 +276,78 @@ export interface AvailableExchange {
   supports_websocket: boolean;
 }
 
+// ---- Sentiment ----
+
+export interface SentimentScore {
+  symbol: string;
+  score: number;
+  signal: string;
+  data_points: number;
+}
+
+export interface SentimentAllScores {
+  scores: Record<string, number>;
+  assets_tracked: number;
+}
+
+export interface SentimentDataPoint {
+  source: string;
+  text: string;
+  label: string;
+  score: number;
+  model: string;
+  timestamp: string;
+}
+
+export interface SentimentTimeline {
+  symbol: string;
+  data_points: SentimentDataPoint[];
+}
+
+export interface SentimentFeedStatus {
+  enabled: boolean;
+  healthy: boolean;
+  last_fetch: string | null;
+  data_points: number;
+  assets_tracked: number;
+  classifier_model: string;
+  using_fallback: boolean;
+}
+
+// ---- On-Chain ----
+
+export interface OnChainScore {
+  symbol: string;
+  score: number;
+  signal: string;
+  metrics_count: number;
+}
+
+export interface OnChainAllScores {
+  scores: Record<string, number>;
+  assets_tracked: number;
+}
+
+export interface OnChainMetric {
+  metric_name: string;
+  metric_value: number;
+  source: string;
+  timestamp: string;
+}
+
+export interface OnChainMetrics {
+  symbol: string;
+  metrics: OnChainMetric[];
+}
+
+export interface OnChainFeedStatus {
+  enabled: boolean;
+  healthy: boolean;
+  last_fetch: string | null;
+  metrics_count: number;
+  assets_tracked: number;
+}
+
 // ---- Market Screener (CoinMarketCap) ----
 
 export interface ScreenerCoin {

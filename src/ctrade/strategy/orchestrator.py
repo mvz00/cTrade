@@ -21,6 +21,8 @@ from ctrade.db.persistence import fire_and_forget, is_db_ready, run_db_operation
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+from ctrade.feeds.onchain import OnChainFeed
+from ctrade.feeds.sentiment import SentimentFeed
 from ctrade.strategy.signal_manager import SignalManager
 
 logger = logging.getLogger(__name__)
@@ -251,11 +253,15 @@ class TradingOrchestrator:
         take_profit_pct: float,
         strategy: dict[str, Any],
     ) -> None:
-        """Analyze a single pair and potentially trade.
+        """Analyze a single pair using 3-way signal fusion and potentially trade.
 
-        When CoinMarketCap data is available, momentum is blended into the
-        composite signal and the entry/exit thresholds are adjusted so that
-        strong-momentum coins can actually trigger BUY/SELL actions.
+        Blends up to three intelligence sources with configurable weights:
+        * Technical analysis (indicators + CMC momentum) — default 0.50
+        * Sentiment (FinBERT-classified news/social)   — default 0.30
+        * On-chain metrics (hash rate, volume, etc.)    — default 0.20
+
+        If a source is unavailable (returns None), its weight is redistributed
+        proportionally to the available sources.
         """
         # Fetch candles
         candles = await market.get_candles(pair, "1h", 100)
@@ -273,59 +279,126 @@ class TradingOrchestrator:
             macd_signal=strategy.get("macd_signal", 9),
         )
 
-        # ---- Momentum boost from CoinMarketCap ----
+        # ---- Gather all intelligence sources ----
+
+        # 1. Technical score (always available) + momentum blend
         cmc_feed = CoinMarketCapFeed.get_instance()
         momentum_score = cmc_feed.get_momentum_score(pair)
+        raw_tech_score = signal.technical_score or 0.5
+
+        # Blend momentum into technical: 60% TA + 40% momentum (when available)
+        if momentum_score is not None:
+            tech_score = 0.60 * raw_tech_score + 0.40 * momentum_score
+        else:
+            tech_score = raw_tech_score
+
+        # 2. Sentiment score (may be None if feed not ready)
+        sentiment_feed = SentimentFeed.get_instance()
+        sentiment_score = sentiment_feed.get_sentiment_score(pair)
+
+        # 3. On-chain score (may be None if feed not ready)
+        onchain_feed = OnChainFeed.get_instance()
+        onchain_score = onchain_feed.get_onchain_score(pair)
+
+        # ---- Weighted fusion with proportional redistribution ----
+
+        raw_weights = {
+            "technical": strategy.get("technical_weight", 0.50),
+            "sentiment": strategy.get("sentiment_weight", 0.30),
+            "onchain": strategy.get("onchain_weight", 0.20),
+        }
+
+        scores: dict[str, float] = {"technical": tech_score}
+        if sentiment_score is not None:
+            scores["sentiment"] = sentiment_score
+        if onchain_score is not None:
+            scores["onchain"] = onchain_score
+
+        # Redistribute unavailable weights proportionally
+        available_weight = sum(raw_weights[k] for k in scores)
+        if available_weight > 0:
+            weights = {k: raw_weights[k] / available_weight for k in scores}
+        else:
+            weights = {"technical": 1.0}
+
+        composite = sum(scores[k] * weights[k] for k in scores)
+        composite = round(max(0.0, min(1.0, composite)), 4)
+
+        # ---- Multi-source agreement bonus ----
+        # If all available sources agree (all >0.55 or all <0.45),
+        # adjust thresholds to make it easier to trigger trades
+        threshold_adjust = 0.0
+        agreement = "mixed"
+
+        if len(scores) >= 2:
+            all_bullish = all(s > 0.55 for s in scores.values())
+            all_bearish = all(s < 0.45 for s in scores.values())
+
+            if all_bullish:
+                agreement = "bullish"
+                # Lower entry threshold, proportional to source count
+                threshold_adjust = -min(0.15, 0.05 * len(scores))
+            elif all_bearish:
+                agreement = "bearish"
+                threshold_adjust = -min(0.15, 0.05 * len(scores))
+
+        adj_entry = entry_threshold + threshold_adjust
+        adj_exit = exit_threshold - threshold_adjust
+
+        # ---- Determine action ----
+        if composite >= adj_entry:
+            action = SignalAction.BUY
+        elif composite <= adj_exit:
+            action = SignalAction.SELL
+        else:
+            action = SignalAction.HOLD
+
+        # ---- Build contributing factors ----
+        contributing_factors = {**signal.contributing_factors}
 
         if momentum_score is not None:
-            tech_score = signal.technical_score or 0.5
+            contributing_factors["momentum"] = {
+                "score": momentum_score,
+                "signal": (
+                    "bullish" if momentum_score > 0.6
+                    else "bearish" if momentum_score < 0.4
+                    else "neutral"
+                ),
+            }
 
-            # Blended composite: technical 60% + momentum 40%
-            composite = 0.60 * tech_score + 0.40 * momentum_score
+        if sentiment_score is not None:
+            contributing_factors["sentiment"] = sentiment_feed.get_contributing_factors(pair)
 
-            # Threshold adjustment: strong momentum lowers the entry bar,
-            # weak momentum raises it.
-            threshold_adjust = 0.0
-            if momentum_score > 0.55:
-                threshold_adjust = -min(0.20, (momentum_score - 0.55) * 0.50)
-            elif momentum_score < 0.45:
-                threshold_adjust = min(0.10, (0.45 - momentum_score) * 0.30)
+        if onchain_score is not None:
+            contributing_factors["onchain"] = onchain_feed.get_contributing_factors(pair)
 
-            adj_entry = entry_threshold + threshold_adjust
-            adj_exit = exit_threshold - threshold_adjust
+        contributing_factors["fusion"] = {
+            "composite": composite,
+            "weights": {k: round(v, 4) for k, v in weights.items()},
+            "scores": {k: round(v, 4) for k, v in scores.items()},
+            "agreement": agreement,
+            "threshold_adjust": round(threshold_adjust, 4),
+            "adj_entry": round(adj_entry, 4),
+            "adj_exit": round(adj_exit, 4),
+            "sources_available": len(scores),
+        }
 
-            # Re-evaluate action with boosted composite + adjusted thresholds
-            if composite >= adj_entry:
-                action = SignalAction.BUY
-            elif composite <= adj_exit:
-                action = SignalAction.SELL
-            else:
-                action = SignalAction.HOLD
+        # Determine strategy name based on available sources
+        source_names = list(scores.keys())
+        strategy_name = "+".join(source_names)
 
-            # Build enriched signal (store momentum in the sentiment_score slot)
-            signal = Signal(
-                id=uuid4(),
-                pair_symbol=signal.pair_symbol,
-                action=action,
-                confidence=round(abs(composite - 0.5) * 2, 4),
-                technical_score=signal.technical_score,
-                sentiment_score=momentum_score,
-                strategy_name="technical+momentum",
-                contributing_factors={
-                    **signal.contributing_factors,
-                    "momentum": {
-                        "score": momentum_score,
-                        "signal": (
-                            "bullish" if momentum_score > 0.6
-                            else "bearish" if momentum_score < 0.4
-                            else "neutral"
-                        ),
-                        "threshold_adjust": round(threshold_adjust, 4),
-                        "composite": round(composite, 4),
-                        "adj_entry": round(adj_entry, 4),
-                    },
-                },
-            )
+        # Build enriched signal
+        signal = Signal(
+            id=uuid4(),
+            pair_symbol=signal.pair_symbol,
+            action=action,
+            confidence=round(abs(composite - 0.5) * 2, 4),
+            technical_score=tech_score,
+            sentiment_score=sentiment_score,
+            onchain_score=onchain_score,
+            strategy_name=strategy_name,
+            contributing_factors=contributing_factors,
+        )
 
         # Store signal
         signal_mgr.add_signal(signal, indicators)
@@ -334,14 +407,17 @@ class TradingOrchestrator:
         await self._check_sl_tp(pair, engine, market, stop_loss_pct, take_profit_pct)
 
         if signal.action == SignalAction.HOLD:
-            extra = ""
-            if momentum_score is not None:
-                extra = f", momentum: {momentum_score:.2f}"
+            extras = []
+            if sentiment_score is not None:
+                extras.append(f"sentiment: {sentiment_score:.2f}")
+            if onchain_score is not None:
+                extras.append(f"onchain: {onchain_score:.2f}")
+            extra_str = f" ({', '.join(extras)})" if extras else ""
             self._log_activity(
                 "signal", pair,
-                f"HOLD {pair} (confidence: {signal.confidence:.2f}{extra})",
+                f"HOLD {pair} (confidence: {signal.confidence:.2f}{extra_str})",
                 {"confidence": signal.confidence, "action": "HOLD",
-                 "momentum": momentum_score},
+                 "composite": composite, "agreement": agreement},
             )
             return
 
@@ -385,7 +461,7 @@ class TradingOrchestrator:
                     {
                         "quantity": quantity, "price": price,
                         "budget": position_budget, "confidence": signal.confidence,
-                        "momentum": momentum_score,
+                        "composite": composite, "agreement": agreement,
                         "strategy": strategy_label,
                         "status": str(order.status),
                     },
@@ -403,7 +479,7 @@ class TradingOrchestrator:
                         "sell", pair,
                         f"AUTO SELL {pair} — closed position (P&L: ${pnl:+.2f})",
                         {"position_id": pos["id"], "pnl": pnl,
-                         "momentum": momentum_score},
+                         "composite": composite, "agreement": agreement},
                     )
 
     async def _check_sl_tp(
