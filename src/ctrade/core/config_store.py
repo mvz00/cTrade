@@ -82,6 +82,11 @@ class RuntimeConfigStore:
             return cls._instance
 
     @classmethod
+    def is_initialized(cls) -> bool:
+        """Check if the store has been initialized."""
+        return cls._instance is not None
+
+    @classmethod
     def get(cls) -> RuntimeConfigStore:
         """Return the singleton instance.  Raises if not initialized."""
         if cls._instance is None:

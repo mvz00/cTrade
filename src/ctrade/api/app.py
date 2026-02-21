@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +24,39 @@ from ctrade.api.routers import (
     trading,
 )
 
+logger = logging.getLogger(__name__)
+
 # Path to the React build output
 _FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+
+@asynccontextmanager
+async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Default lifespan that initializes the config store.
+
+    Used when create_app() is called directly (e.g. uvicorn ctrade.api.app:create_app --factory)
+    without going through main.py.
+    """
+    from ctrade.core.config_store import RuntimeConfigStore
+    from ctrade.core.events import EventBus
+    from ctrade.settings import get_settings
+
+    settings = get_settings()
+
+    # Only initialize if not already done (main.py may have already called this)
+    if not RuntimeConfigStore.is_initialized():
+        RuntimeConfigStore.initialize(settings)
+        logger.info("Runtime config store initialized (default lifespan)")
+
+    # Start event bus
+    event_bus = EventBus()
+    await event_bus.start()
+    logger.info("cTrade ready — visit http://%s:%d", settings.api_host, settings.api_port)
+
+    yield
+
+    await event_bus.stop()
+    logger.info("cTrade shutdown complete")
 
 
 def create_app(lifespan: Any = None) -> FastAPI:
@@ -30,6 +64,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
 
     Args:
         lifespan: Optional async context manager for startup/shutdown lifecycle.
+                  If not provided, a default lifespan initializes core services.
     """
     app = FastAPI(
         title="cTrade",
@@ -37,7 +72,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
         version="0.1.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
-        lifespan=lifespan,
+        lifespan=lifespan or _default_lifespan,
     )
 
     # Middleware
