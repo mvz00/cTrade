@@ -94,11 +94,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await _event_bus.start()
     logger.info("Event bus started")
 
-    # Start CoinMarketCap feed (no-op if no API key configured)
+    # Start data feeds (each is no-op if preconditions not met)
     from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+    from ctrade.feeds.onchain import OnChainFeed
+    from ctrade.feeds.sentiment import SentimentFeed
 
     cmc_feed = CoinMarketCapFeed.get_instance()
     await cmc_feed.start()
+
+    sentiment_feed = SentimentFeed.get_instance()
+    await sentiment_feed.start()
+
+    onchain_feed = OnChainFeed.get_instance()
+    await onchain_feed.start()
 
     logger.info("cTrade startup complete — visit http://%s:%d", settings.api_host, settings.api_port)
 
@@ -107,6 +115,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Shutdown ---
     logger.info("Shutting down cTrade...")
 
+    await onchain_feed.stop()
+    await sentiment_feed.stop()
     await cmc_feed.stop()
 
     if _event_bus:

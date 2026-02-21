@@ -30,6 +30,14 @@ import type {
   AlertHistory,
   ScreenerResponse,
   CMCFeedStatus,
+  SentimentScore,
+  SentimentAllScores,
+  SentimentTimeline,
+  SentimentFeedStatus,
+  OnChainScore,
+  OnChainAllScores,
+  OnChainMetrics,
+  OnChainFeedStatus,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -127,6 +135,20 @@ export const api = {
   deleteAlert: (id: string) => apiFetch<void>(`/alerts/${id}`, { method: 'DELETE' }),
   toggleAlert: (id: string) => apiFetch<AlertConfig>(`/alerts/${id}/toggle`, { method: 'PUT' }),
   alertHistory: () => apiFetch<AlertHistory[]>('/alerts/history'),
+
+  // ---- Sentiment ----
+  sentimentScores: () => apiFetch<SentimentAllScores>('/sentiment/scores'),
+  sentimentScore: (symbol: string) => apiFetch<SentimentScore>(`/sentiment/${encodeURIComponent(symbol)}/score`),
+  sentimentTimeline: (symbol: string, limit = 20) =>
+    apiFetch<SentimentTimeline>(`/sentiment/${encodeURIComponent(symbol)}/timeline?limit=${limit}`),
+  sentimentStatus: () => apiFetch<SentimentFeedStatus>('/sentiment/status'),
+
+  // ---- On-Chain ----
+  onchainScores: () => apiFetch<OnChainAllScores>('/onchain/scores'),
+  onchainScore: (symbol: string) => apiFetch<OnChainScore>(`/onchain/${encodeURIComponent(symbol)}/score`),
+  onchainMetrics: (symbol: string, limit = 20) =>
+    apiFetch<OnChainMetrics>(`/onchain/${encodeURIComponent(symbol)}/metrics?limit=${limit}`),
+  onchainStatus: () => apiFetch<OnChainFeedStatus>('/onchain/status'),
 
   // ---- Market Screener ----
   screenerGainers: (limit = 20) =>

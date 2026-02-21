@@ -20,7 +20,9 @@ from ctrade.api.routers import (
     dashboard,
     exchanges,
     health,
+    onchain,
     screener,
+    sentiment,
     signals,
     trading,
 )
@@ -91,16 +93,26 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("Singleton hydration failed (non-fatal): %s", e)
 
-    # Start CoinMarketCap feed (no-op if no API key configured)
+    # Start data feeds (each is no-op if preconditions not met)
     from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+    from ctrade.feeds.onchain import OnChainFeed
+    from ctrade.feeds.sentiment import SentimentFeed
 
     cmc_feed = CoinMarketCapFeed.get_instance()
     await cmc_feed.start()
+
+    sentiment_feed = SentimentFeed.get_instance()
+    await sentiment_feed.start()
+
+    onchain_feed = OnChainFeed.get_instance()
+    await onchain_feed.start()
 
     logger.info("cTrade ready — visit http://%s:%d", settings.api_host, settings.api_port)
 
     yield
 
+    await onchain_feed.stop()
+    await sentiment_feed.stop()
     await cmc_feed.stop()
     await event_bus.stop()
     if db_available:
@@ -140,6 +152,8 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(backtest.router, prefix="/api/v1")
     app.include_router(alerts.router, prefix="/api/v1")
     app.include_router(screener.router, prefix="/api/v1")
+    app.include_router(sentiment.router, prefix="/api/v1")
+    app.include_router(onchain.router, prefix="/api/v1")
 
     # Serve React SPA if the build exists, otherwise fall back to landing page
     if _FRONTEND_DIR.is_dir() and (_FRONTEND_DIR / "index.html").exists():

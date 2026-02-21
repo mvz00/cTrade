@@ -71,7 +71,12 @@ async def get_system_status() -> dict[str, Any]:
         exchanges = store.list_exchanges()
 
         from ctrade.db.engine import ping_db
+        from ctrade.feeds.onchain import OnChainFeed
+        from ctrade.feeds.sentiment import SentimentFeed
+
         db_ok = await ping_db()
+        sentiment = SentimentFeed.get_instance()
+        onchain = OnChainFeed.get_instance()
 
         return {
             "api_server": {"status": "ok", "label": "Online"},
@@ -86,6 +91,14 @@ async def get_system_status() -> dict[str, Any]:
             "trading_engine": {
                 "status": "ok" if orch.is_running else "warning",
                 "label": "Running" if orch.is_running else "Stopped",
+            },
+            "sentiment_feed": {
+                "status": "ok" if sentiment.is_enabled and await sentiment.healthcheck() else "warning",
+                "label": "Active" if sentiment.is_enabled else "Inactive",
+            },
+            "onchain_feed": {
+                "status": "ok" if onchain.is_enabled and await onchain.healthcheck() else "warning",
+                "label": "Active" if onchain.is_enabled else "Inactive",
             },
             "event_bus": {"status": "ok", "label": "Running"},
             "watched_pairs": len(engine.get_watched_pairs()),
