@@ -47,13 +47,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize database (non-fatal if unavailable)
     try:
+        from ctrade.db.engine import ping_db
+
         init_db(
             database_url=settings.db.url,
             pool_size=settings.db.pool_size,
             echo=settings.db.echo_sql,
         )
-        _db_available = True
-        logger.info("Database engine initialized")
+        # Engine created, but verify actual connectivity before proceeding
+        if await ping_db():
+            _db_available = True
+            logger.info("Database connected and ready")
+        else:
+            _db_available = False
+            await close_db()
+            logger.warning(
+                "Database unreachable — running in memory-only mode. "
+                "Start PostgreSQL with: docker-compose up -d"
+            )
     except Exception as e:
         _db_available = False
         logger.warning(

@@ -81,6 +81,14 @@ async def run_db_operation(
         result = await operation(session, resolver)
         await session.commit()
         return result
+    except OSError as e:
+        # Connection refused / network error — don't dump full traceback
+        logger.warning("DB operation skipped (connection error): %s — %s", description, e)
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return None
     except Exception:
         logger.exception("DB operation failed: %s", description)
         try:
