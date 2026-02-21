@@ -38,7 +38,7 @@ async def test_add_pair(test_app):
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.post("/api/v1/trading/pairs", json={"symbol": "BTC/USDT"})
-    assert r.status_code == 200
+    assert r.status_code == 201
     assert r.json()["symbol"] == "BTC/USDT"
 
 
@@ -81,7 +81,7 @@ async def test_place_order(test_app):
             "order_type": "market",
             "quantity": 0.01,
         })
-    assert r.status_code == 200
+    assert r.status_code == 201
     data = r.json()
     assert data["status"] == "filled"
     assert data["pair_symbol"] == "BTC/USDT"

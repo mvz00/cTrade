@@ -12,6 +12,9 @@ from ctrade.exchange.market_data import MarketDataProvider
 @pytest.fixture(autouse=True)
 def _reset():
     MarketDataProvider.reset()
+    # Reset the module-level backtest engine results
+    from ctrade.api.routers import backtest as backtest_mod
+    backtest_mod._engine._results.clear()
     yield
     MarketDataProvider.reset()
 

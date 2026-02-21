@@ -40,7 +40,7 @@ async def test_create_alert(test_app):
             "value": 70000.0,
             "message": "BTC mooning!",
         })
-    assert r.status_code == 200
+    assert r.status_code == 201
     data = r.json()
     assert data["alert_type"] == "price_above"
     assert data["symbol"] == "BTC/USDT"
