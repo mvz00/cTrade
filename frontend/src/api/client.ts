@@ -28,6 +28,8 @@ import type {
   AlertConfig,
   CreateAlertRequest,
   AlertHistory,
+  ScreenerResponse,
+  CMCFeedStatus,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -83,6 +85,8 @@ export const api = {
   availablePairs: () => apiFetch<string[]>('/trading/available-pairs'),
   addPair: (symbol: string) =>
     apiFetch<TradingPair>('/trading/pairs', { method: 'POST', body: JSON.stringify({ symbol }) }),
+  addPairsBatch: (symbols: string[]) =>
+    apiFetch<TradingPair[]>('/trading/pairs/batch', { method: 'POST', body: JSON.stringify({ symbols }) }),
   removePair: (symbol: string) =>
     apiFetch<void>(`/trading/pairs/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
   listOrders: (status?: string) =>
@@ -123,4 +127,24 @@ export const api = {
   deleteAlert: (id: string) => apiFetch<void>(`/alerts/${id}`, { method: 'DELETE' }),
   toggleAlert: (id: string) => apiFetch<AlertConfig>(`/alerts/${id}/toggle`, { method: 'PUT' }),
   alertHistory: () => apiFetch<AlertHistory[]>('/alerts/history'),
+
+  // ---- Market Screener ----
+  screenerGainers: (limit = 20) =>
+    apiFetch<ScreenerResponse>(`/screener/gainers?limit=${limit}`),
+  screenerLosers: (limit = 20) =>
+    apiFetch<ScreenerResponse>(`/screener/losers?limit=${limit}`),
+  screenerSearch: (params?: {
+    sort_by?: string; sort_dir?: string; limit?: number;
+    min_market_cap?: number; min_volume?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.sort_by) qs.set('sort_by', params.sort_by);
+    if (params?.sort_dir) qs.set('sort_dir', params.sort_dir);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.min_market_cap) qs.set('min_market_cap', String(params.min_market_cap));
+    if (params?.min_volume) qs.set('min_volume', String(params.min_volume));
+    const q = qs.toString();
+    return apiFetch<ScreenerResponse>(`/screener/search${q ? `?${q}` : ''}`);
+  },
+  cmcFeedStatus: () => apiFetch<CMCFeedStatus>('/screener/status'),
 };

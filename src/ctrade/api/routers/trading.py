@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from ctrade.api.schemas.trading import (
     ActivityEntry,
     AddPairRequest,
+    AddPairsBatchRequest,
     EngineStartRequest,
     EngineStatusResponse,
     OrderResponse,
@@ -40,6 +45,17 @@ async def add_pair(body: AddPairRequest) -> PairResponse:
     if not engine.add_watched_pair(body.symbol):
         raise HTTPException(status_code=409, detail=f"Pair {body.symbol} already watched")
     return PairResponse(symbol=body.symbol)
+
+
+@router.post("/pairs/batch", response_model=list[PairResponse], status_code=201)
+async def add_pairs_batch(body: AddPairsBatchRequest) -> list[PairResponse]:
+    """Add multiple trading pairs at once."""
+    engine = PaperEngine.get_instance()
+    added = []
+    for symbol in body.symbols:
+        if engine.add_watched_pair(symbol):
+            added.append(PairResponse(symbol=symbol))
+    return added
 
 
 @router.delete("/pairs/{symbol:path}", status_code=204)
@@ -124,6 +140,45 @@ async def get_portfolio() -> PortfolioResponse:
 
     engine = PaperEngine.get_instance()
     return PortfolioResponse(**engine.get_portfolio())
+
+
+# ---- Trade History CSV Export ----
+
+@router.get("/history/export")
+async def export_trade_history() -> StreamingResponse:
+    """Export closed positions as a CSV file."""
+    engine = PaperEngine.get_instance()
+    positions = engine.get_positions(status="closed")
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "id", "pair", "side", "entry_price", "exit_price",
+        "quantity", "realized_pnl", "realized_pnl_pct",
+        "fees", "strategy", "opened_at", "closed_at",
+    ])
+    for p in positions:
+        writer.writerow([
+            p.get("id", ""),
+            p.get("pair_symbol", ""),
+            p.get("side", ""),
+            p.get("entry_price", ""),
+            p.get("exit_price", ""),
+            p.get("quantity", ""),
+            p.get("realized_pnl", ""),
+            p.get("realized_pnl_pct", ""),
+            p.get("fees_total", ""),
+            p.get("strategy_name", ""),
+            p.get("opened_at", ""),
+            p.get("closed_at", ""),
+        ])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=trade_history.csv"},
+    )
 
 
 # ---- Ticker ----

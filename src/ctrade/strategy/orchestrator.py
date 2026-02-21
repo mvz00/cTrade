@@ -11,11 +11,15 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, ClassVar
 
+from uuid import uuid4
+
 from ctrade.analysis.technical.engine import TechnicalAnalysisEngine
 from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.core.enums import PositionStatus, SignalAction
+from ctrade.core.models import Signal
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
+from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
 from ctrade.strategy.signal_manager import SignalManager
 
 logger = logging.getLogger(__name__)
@@ -197,7 +201,12 @@ class TradingOrchestrator:
         take_profit_pct: float,
         strategy: dict[str, Any],
     ) -> None:
-        """Analyze a single pair and potentially trade."""
+        """Analyze a single pair and potentially trade.
+
+        When CoinMarketCap data is available, momentum is blended into the
+        composite signal and the entry/exit thresholds are adjusted so that
+        strong-momentum coins can actually trigger BUY/SELL actions.
+        """
         # Fetch candles
         candles = await market.get_candles(pair, "1h", 100)
         if len(candles) < 30:
@@ -214,6 +223,60 @@ class TradingOrchestrator:
             macd_signal=strategy.get("macd_signal", 9),
         )
 
+        # ---- Momentum boost from CoinMarketCap ----
+        cmc_feed = CoinMarketCapFeed.get_instance()
+        momentum_score = cmc_feed.get_momentum_score(pair)
+
+        if momentum_score is not None:
+            tech_score = signal.technical_score or 0.5
+
+            # Blended composite: technical 60% + momentum 40%
+            composite = 0.60 * tech_score + 0.40 * momentum_score
+
+            # Threshold adjustment: strong momentum lowers the entry bar,
+            # weak momentum raises it.
+            threshold_adjust = 0.0
+            if momentum_score > 0.55:
+                threshold_adjust = -min(0.20, (momentum_score - 0.55) * 0.50)
+            elif momentum_score < 0.45:
+                threshold_adjust = min(0.10, (0.45 - momentum_score) * 0.30)
+
+            adj_entry = entry_threshold + threshold_adjust
+            adj_exit = exit_threshold - threshold_adjust
+
+            # Re-evaluate action with boosted composite + adjusted thresholds
+            if composite >= adj_entry:
+                action = SignalAction.BUY
+            elif composite <= adj_exit:
+                action = SignalAction.SELL
+            else:
+                action = SignalAction.HOLD
+
+            # Build enriched signal (store momentum in the sentiment_score slot)
+            signal = Signal(
+                id=uuid4(),
+                pair_symbol=signal.pair_symbol,
+                action=action,
+                confidence=round(abs(composite - 0.5) * 2, 4),
+                technical_score=signal.technical_score,
+                sentiment_score=momentum_score,
+                strategy_name="technical+momentum",
+                contributing_factors={
+                    **signal.contributing_factors,
+                    "momentum": {
+                        "score": momentum_score,
+                        "signal": (
+                            "bullish" if momentum_score > 0.6
+                            else "bearish" if momentum_score < 0.4
+                            else "neutral"
+                        ),
+                        "threshold_adjust": round(threshold_adjust, 4),
+                        "composite": round(composite, 4),
+                        "adj_entry": round(adj_entry, 4),
+                    },
+                },
+            )
+
         # Store signal
         signal_mgr.add_signal(signal, indicators)
 
@@ -221,10 +284,14 @@ class TradingOrchestrator:
         await self._check_sl_tp(pair, engine, market, stop_loss_pct, take_profit_pct)
 
         if signal.action == SignalAction.HOLD:
+            extra = ""
+            if momentum_score is not None:
+                extra = f", momentum: {momentum_score:.2f}"
             self._log_activity(
                 "signal", pair,
-                f"HOLD {pair} (confidence: {signal.confidence:.2f})",
-                {"confidence": signal.confidence, "action": "HOLD"},
+                f"HOLD {pair} (confidence: {signal.confidence:.2f}{extra})",
+                {"confidence": signal.confidence, "action": "HOLD",
+                 "momentum": momentum_score},
             )
             return
 
@@ -246,6 +313,8 @@ class TradingOrchestrator:
                 return
             quantity = position_budget / price
 
+            strategy_label = signal.strategy_name or "technical"
+
             if quantity > 0:
                 order = engine.place_order(
                     symbol=pair,
@@ -253,11 +322,12 @@ class TradingOrchestrator:
                     order_type="market",
                     quantity=quantity,
                     signal_id=str(signal.id),
-                    strategy_name="technical",
+                    strategy_name=strategy_label,
                 )
                 logger.info(
-                    "AUTO BUY %s: qty=%.6f @ %.2f (confidence=%.2f, budget=$%.2f) → %s",
-                    pair, quantity, price, signal.confidence, position_budget, order.status,
+                    "AUTO BUY %s: qty=%.6f @ %.2f (confidence=%.2f, budget=$%.2f, strategy=%s) → %s",
+                    pair, quantity, price, signal.confidence, position_budget,
+                    strategy_label, order.status,
                 )
                 self._log_activity(
                     "buy", pair,
@@ -265,6 +335,8 @@ class TradingOrchestrator:
                     {
                         "quantity": quantity, "price": price,
                         "budget": position_budget, "confidence": signal.confidence,
+                        "momentum": momentum_score,
+                        "strategy": strategy_label,
                         "status": str(order.status),
                     },
                 )
@@ -280,7 +352,8 @@ class TradingOrchestrator:
                     self._log_activity(
                         "sell", pair,
                         f"AUTO SELL {pair} — closed position (P&L: ${pnl:+.2f})",
-                        {"position_id": pos["id"], "pnl": pnl},
+                        {"position_id": pos["id"], "pnl": pnl,
+                         "momentum": momentum_score},
                     )
 
     async def _check_sl_tp(

@@ -19,6 +19,14 @@ export function useAddPair() {
   });
 }
 
+export function useAddPairsBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (symbols: string[]) => api.addPairsBatch(symbols),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['trading', 'pairs'] }),
+  });
+}
+
 export function useRemovePair() {
   const qc = useQueryClient();
   return useMutation({

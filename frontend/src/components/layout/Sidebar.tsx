@@ -4,6 +4,7 @@ import {
   CandlestickChart,
   Settings,
   Activity,
+  Flame,
   FlaskConical,
   Bell,
   ChevronLeft,
@@ -18,6 +19,7 @@ const navItems = [
   { to: ROUTES.TRADING, icon: CandlestickChart, label: 'Trading' },
   { to: ROUTES.CONFIGURATION, icon: Settings, label: 'Configuration' },
   { to: ROUTES.SIGNALS, icon: Activity, label: 'Signals' },
+  { to: ROUTES.SCREENER, icon: Flame, label: 'Screener' },
   { to: ROUTES.BACKTESTING, icon: FlaskConical, label: 'Backtesting' },
   { to: ROUTES.ALERTS, icon: Bell, label: 'Alerts' },
 ];

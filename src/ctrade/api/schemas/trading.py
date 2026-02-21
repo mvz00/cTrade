@@ -11,6 +11,10 @@ class AddPairRequest(BaseModel):
     symbol: str = Field(min_length=3, examples=["BTC/USDT"])
 
 
+class AddPairsBatchRequest(BaseModel):
+    symbols: list[str] = Field(min_length=1)
+
+
 class PairResponse(BaseModel):
     symbol: str
     is_active: bool = True

@@ -20,6 +20,7 @@ from ctrade.api.routers import (
     dashboard,
     exchanges,
     health,
+    screener,
     signals,
     trading,
 )
@@ -51,10 +52,18 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start event bus
     event_bus = EventBus()
     await event_bus.start()
+
+    # Start CoinMarketCap feed (no-op if no API key configured)
+    from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+
+    cmc_feed = CoinMarketCapFeed.get_instance()
+    await cmc_feed.start()
+
     logger.info("cTrade ready — visit http://%s:%d", settings.api_host, settings.api_port)
 
     yield
 
+    await cmc_feed.stop()
     await event_bus.stop()
     logger.info("cTrade shutdown complete")
 
@@ -87,6 +96,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(signals.router, prefix="/api/v1")
     app.include_router(backtest.router, prefix="/api/v1")
     app.include_router(alerts.router, prefix="/api/v1")
+    app.include_router(screener.router, prefix="/api/v1")
 
     # Serve React SPA if the build exists, otherwise fall back to landing page
     if _FRONTEND_DIR.is_dir() and (_FRONTEND_DIR / "index.html").exists():

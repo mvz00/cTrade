@@ -179,24 +179,29 @@ class RuntimeConfigStore:
             if "risk" in state and isinstance(state["risk"], dict):
                 self._risk.update(state["risk"])
 
-            # Restore exchanges
+            # Restore exchanges (per-exchange error handling so one bad
+            # entry doesn't prevent loading the rest)
             if "exchanges" in state and isinstance(state["exchanges"], list):
-                self._exchanges = []
-                for ex_data in state["exchanges"]:
-                    passphrase_enc = ex_data.get("passphrase_encrypted")
-                    entry = ExchangeEntry(
-                        id=ex_data["id"],
-                        name=ex_data["name"],
-                        exchange_type=ex_data["exchange_type"],
-                        api_key_encrypted=base64.b64decode(ex_data["api_key_encrypted"]),
-                        api_secret_encrypted=base64.b64decode(ex_data["api_secret_encrypted"]),
-                        passphrase_encrypted=(
-                            base64.b64decode(passphrase_enc) if passphrase_enc else None
-                        ),
-                        is_active=ex_data.get("is_active", True),
-                        created_at=datetime.fromisoformat(ex_data["created_at"]),
-                    )
-                    self._exchanges.append(entry)
+                restored: list[ExchangeEntry] = []
+                for i, ex_data in enumerate(state["exchanges"]):
+                    try:
+                        passphrase_enc = ex_data.get("passphrase_encrypted")
+                        entry = ExchangeEntry(
+                            id=ex_data["id"],
+                            name=ex_data["name"],
+                            exchange_type=ex_data["exchange_type"],
+                            api_key_encrypted=base64.b64decode(ex_data["api_key_encrypted"]),
+                            api_secret_encrypted=base64.b64decode(ex_data["api_secret_encrypted"]),
+                            passphrase_encrypted=(
+                                base64.b64decode(passphrase_enc) if passphrase_enc else None
+                            ),
+                            is_active=ex_data.get("is_active", True),
+                            created_at=datetime.fromisoformat(ex_data["created_at"]),
+                        )
+                        restored.append(entry)
+                    except Exception:
+                        logger.exception("Failed to restore exchange entry %d — skipping", i)
+                self._exchanges = restored
 
             logger.info(
                 "Restored config state from disk (%d exchanges)",

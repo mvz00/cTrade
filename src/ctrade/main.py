@@ -67,12 +67,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await _event_bus.start()
     logger.info("Event bus started")
 
+    # Start CoinMarketCap feed (no-op if no API key configured)
+    from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+
+    cmc_feed = CoinMarketCapFeed.get_instance()
+    await cmc_feed.start()
+
     logger.info("cTrade startup complete — visit http://%s:%d", settings.api_host, settings.api_port)
 
     yield  # App is running
 
     # --- Shutdown ---
     logger.info("Shutting down cTrade...")
+
+    await cmc_feed.stop()
 
     if _event_bus:
         await _event_bus.stop()

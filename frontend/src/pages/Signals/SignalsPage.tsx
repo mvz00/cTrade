@@ -18,7 +18,7 @@ export function SignalsPage() {
 
   return (
     <div>
-      <PageHeader title="Signals" description="Trading signals from technical analysis" />
+      <PageHeader title="Signals" description="Trading signals from technical analysis + momentum" />
 
       {/* Filters */}
       <div className="flex gap-3 mb-6">
@@ -63,8 +63,16 @@ export function SignalsPage() {
                     </div>
                     {s.technical_score !== null && (
                       <div className="text-right">
-                        <div className="text-xs text-ct-text-muted">Tech Score</div>
+                        <div className="text-xs text-ct-text-muted">Tech</div>
                         <span className="text-sm text-ct-text">{(s.technical_score * 100).toFixed(1)}%</span>
+                      </div>
+                    )}
+                    {s.sentiment_score !== null && (
+                      <div className="text-right">
+                        <div className="text-xs text-ct-text-muted">Momentum</div>
+                        <span className={`text-sm ${s.sentiment_score > 0.6 ? 'text-ct-green' : s.sentiment_score < 0.4 ? 'text-ct-red' : 'text-ct-text'}`}>
+                          {(s.sentiment_score * 100).toFixed(1)}%
+                        </span>
                       </div>
                     )}
                     <span className="text-xs text-ct-text-dim">{formatRelative(s.created_at)}</span>

@@ -275,3 +275,31 @@ export interface AvailableExchange {
   default_fee_pct: number;
   supports_websocket: boolean;
 }
+
+// ---- Market Screener (CoinMarketCap) ----
+
+export interface ScreenerCoin {
+  symbol: string;
+  name: string;
+  cmc_rank: number;
+  market_cap: number;
+  volume_24h: number;
+  pct_change_1h: number;
+  pct_change_24h: number;
+  pct_change_7d: number;
+  volume_change_24h: number;
+  momentum_score: number | null;
+}
+
+export interface ScreenerResponse {
+  coins: ScreenerCoin[];
+  last_updated: string | null;
+  source: string;
+}
+
+export interface CMCFeedStatus {
+  enabled: boolean;
+  healthy: boolean;
+  last_fetch: string | null;
+  listings_count: number;
+}
