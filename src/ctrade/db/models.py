@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     LargeBinary,
@@ -62,7 +63,7 @@ class TradingPairModel(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     exchange_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+        UUID(as_uuid=True), ForeignKey("exchanges.id"), nullable=False
     )
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     base_currency: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -279,7 +280,9 @@ class ApiCredentialModel(Base):
     __tablename__ = "api_credentials"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    exchange_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    exchange_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("exchanges.id"), nullable=False
+    )
     label: Mapped[str | None] = mapped_column(String(100), nullable=True)
     api_key_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     api_secret_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

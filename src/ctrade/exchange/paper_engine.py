@@ -1,7 +1,9 @@
-"""In-memory paper trading engine.
+"""Paper trading engine with optional database persistence.
 
 Simulates order execution, position management, and portfolio tracking
-without connecting to a real exchange. All state lives in memory.
+without connecting to a real exchange.  Primary state lives in memory for
+fast reads; mutations are written through to the database asynchronously
+when a DB connection is available (fire-and-forget).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from ctrade.core.enums import (
     TradingMode,
 )
 from ctrade.core.models import Order, Position
+from ctrade.db.persistence import fire_and_forget, is_db_ready, run_db_operation
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +178,8 @@ class PaperEngine:
                 # Limit/stop orders stay pending
                 self._orders.append(order)
 
+        # Write-through to DB (async, non-blocking)
+        fire_and_forget(self._persist_order_async(order))
         return order
 
     def _update_positions(self, order: Order, strategy_name: str = "") -> None:
@@ -200,6 +205,7 @@ class PaperEngine:
                     entry_signal_id=order.signal_id,
                 )
                 self._positions.append(pos)
+                fire_and_forget(self._persist_position_async(pos))
 
         elif order.side == OrderSide.SELL:
             existing = self._find_open_position(order.pair_symbol, PositionSide.LONG)
@@ -220,6 +226,7 @@ class PaperEngine:
                     entry_signal_id=order.signal_id,
                 )
                 self._positions.append(pos)
+                fire_and_forget(self._persist_position_async(pos))
 
     def _find_open_position(self, symbol: str, side: PositionSide) -> Position | None:
         for pos in self._positions:
@@ -243,6 +250,10 @@ class PaperEngine:
             pos.realized_pnl = pnl
             if pos.entry_price > 0:
                 pos.realized_pnl_pct = (pnl / (pos.entry_price * pos.quantity)) * 100
+
+        # Persist closed position + cash snapshot
+        fire_and_forget(self._persist_position_async(pos))
+        fire_and_forget(self._persist_cash_snapshot_async())
 
     def close_position(self, position_id: str) -> Order | None:
         """Close a position at market price."""
@@ -388,6 +399,97 @@ class PaperEngine:
             ]
             closed.sort(key=lambda p: p.closed_at or p.opened_at, reverse=True)
             return [self._position_to_dict(p) for p in closed[:limit]]
+
+    # ---- Database persistence ----
+
+    async def hydrate_from_db(self) -> None:
+        """Load persisted state from database.  Called once at startup."""
+        if not is_db_ready():
+            logger.info("DB not available — PaperEngine starting with empty in-memory state")
+            return
+
+        async def _load(session, resolver):
+            from sqlalchemy import select
+            from ctrade.db.mappers import orm_to_order, orm_to_position
+            from ctrade.db.models import OrderModel, PositionModel, PortfolioSnapshotModel
+
+            # Load orders
+            stmt = select(OrderModel).where(OrderModel.trading_mode == "paper")
+            orm_orders = (await session.execute(stmt)).scalars().all()
+            orders = [orm_to_order(o, resolver) for o in orm_orders]
+
+            # Load positions
+            stmt = select(PositionModel).where(PositionModel.trading_mode == "paper")
+            orm_positions = (await session.execute(stmt)).scalars().all()
+            positions = [orm_to_position(p, resolver) for p in orm_positions]
+
+            # Load latest cash snapshot
+            stmt = (
+                select(PortfolioSnapshotModel)
+                .where(PortfolioSnapshotModel.trading_mode == "paper")
+                .order_by(PortfolioSnapshotModel.time.desc())
+                .limit(1)
+            )
+            snapshot = (await session.execute(stmt)).scalar_one_or_none()
+
+            return orders, positions, snapshot
+
+        loaded = await run_db_operation(_load, description="hydrate PaperEngine")
+        if loaded is None:
+            return
+
+        orders, positions, snapshot = loaded
+        with self._data_lock:
+            if orders:
+                self._orders = orders
+            if positions:
+                self._positions = positions
+            if snapshot and snapshot.cash_balance:
+                self._cash = {
+                    k: Decimal(str(v)) for k, v in snapshot.cash_balance.items()
+                }
+                self._daily_pnl_start = float(snapshot.total_value_usd or 0)
+
+        logger.info(
+            "Hydrated PaperEngine from DB: %d orders, %d positions",
+            len(orders),
+            len(positions),
+        )
+
+    async def _persist_order_async(self, order: Order) -> None:
+        """Write-through: persist a single order to the database."""
+        async def _do(session, resolver):
+            from ctrade.db.mappers import order_to_orm
+            orm_order = await order_to_orm(order, resolver)
+            await session.merge(orm_order)
+        await run_db_operation(_do, description="persist order")
+
+    async def _persist_position_async(self, position: Position) -> None:
+        """Write-through: persist a single position to the database."""
+        async def _do(session, resolver):
+            from ctrade.db.mappers import position_to_orm
+            orm_pos = await position_to_orm(position, resolver)
+            await session.merge(orm_pos)
+        await run_db_operation(_do, description="persist position")
+
+    async def _persist_cash_snapshot_async(self) -> None:
+        """Write-through: persist current cash balances as a portfolio snapshot."""
+        async def _do(session, resolver):
+            from ctrade.db.models import PortfolioSnapshotModel
+            exchange_id = await resolver.get_exchange_id("paper")
+            open_count = sum(
+                1 for p in self._positions if p.status == PositionStatus.OPEN
+            )
+            total_usd = sum(float(v) for v in self._cash.values())
+            snapshot = PortfolioSnapshotModel(
+                exchange_id=exchange_id,
+                trading_mode="paper",
+                total_value_usd=round(total_usd, 2),
+                cash_balance={k: float(v) for k, v in self._cash.items()},
+                open_positions=open_count,
+            )
+            session.add(snapshot)
+        await run_db_operation(_do, description="persist cash snapshot")
 
     # ---- Serialization ----
 

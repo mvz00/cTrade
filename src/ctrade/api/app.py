@@ -53,6 +53,35 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     event_bus = EventBus()
     await event_bus.start()
 
+    # Initialize database (non-fatal)
+    db_available = False
+    try:
+        from ctrade.db.engine import init_db
+        init_db(
+            database_url=settings.db.url,
+            pool_size=settings.db.pool_size,
+            echo=settings.db.echo_sql,
+        )
+        db_available = True
+    except Exception:
+        logger.warning("Database unavailable in default lifespan (non-fatal)")
+
+    # Hydrate singletons from DB
+    if db_available:
+        try:
+            from ctrade.exchange.paper_engine import PaperEngine
+            from ctrade.notifications.alert_manager import AlertManager
+            from ctrade.strategy.orchestrator import TradingOrchestrator
+            from ctrade.strategy.signal_manager import SignalManager
+
+            await PaperEngine.get_instance().hydrate_from_db()
+            await SignalManager.get_instance().hydrate_from_db()
+            await AlertManager.get_instance().hydrate_from_db()
+            await TradingOrchestrator.get_instance().hydrate_from_db()
+            logger.info("All singletons hydrated from database")
+        except Exception as e:
+            logger.warning("Singleton hydration failed (non-fatal): %s", e)
+
     # Start CoinMarketCap feed (no-op if no API key configured)
     from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
 
@@ -65,6 +94,12 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await cmc_feed.stop()
     await event_bus.stop()
+    if db_available:
+        try:
+            from ctrade.db.engine import close_db
+            await close_db()
+        except Exception:
+            pass
     logger.info("cTrade shutdown complete")
 
 

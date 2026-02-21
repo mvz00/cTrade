@@ -1,11 +1,19 @@
-"""In-memory signal store for generated trading signals."""
+"""Signal store with optional database persistence.
+
+Stores and retrieves trading signals.  Primary state is in-memory for fast
+reads; new signals are written through to the database asynchronously.
+"""
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, ClassVar
 
 from ctrade.core.models import Signal
+from ctrade.db.persistence import fire_and_forget, is_db_ready, run_db_operation
+
+logger = logging.getLogger(__name__)
 
 
 class SignalManager:
@@ -40,6 +48,8 @@ class SignalManager:
                 self._signals = self._signals[-self.MAX_SIGNALS:]
             if indicators and signal.pair_symbol:
                 self._indicators_cache[signal.pair_symbol] = indicators
+        # Write-through to DB (async, non-blocking)
+        fire_and_forget(self._persist_signal(signal))
 
     def list_signals(
         self,
@@ -65,6 +75,43 @@ class SignalManager:
     def get_indicators(self, symbol: str) -> dict[str, Any] | None:
         with self._data_lock:
             return self._indicators_cache.get(symbol)
+
+    # ---- Database persistence ----
+
+    async def hydrate_from_db(self) -> None:
+        """Load recent signals from database.  Called once at startup."""
+        if not is_db_ready():
+            logger.info("DB not available — SignalManager starting with empty state")
+            return
+
+        async def _load(session, resolver):
+            from sqlalchemy import select
+            from ctrade.db.mappers import orm_to_signal
+            from ctrade.db.models import SignalModel
+
+            stmt = (
+                select(SignalModel)
+                .order_by(SignalModel.created_at.desc())
+                .limit(self.MAX_SIGNALS)
+            )
+            orm_signals = (await session.execute(stmt)).scalars().all()
+            return [orm_to_signal(o, resolver) for o in reversed(orm_signals)]
+
+        loaded = await run_db_operation(_load, description="hydrate SignalManager")
+        if loaded:
+            with self._data_lock:
+                self._signals = loaded
+            logger.info("Hydrated SignalManager from DB: %d signals", len(loaded))
+
+    async def _persist_signal(self, signal: Signal) -> None:
+        """Write-through: persist a single signal to the database."""
+        async def _do(session, resolver):
+            from ctrade.db.mappers import signal_to_orm
+            orm_sig = await signal_to_orm(signal, resolver)
+            session.add(orm_sig)
+        await run_db_operation(_do, description="persist signal")
+
+    # ---- Serialization ----
 
     @staticmethod
     def _signal_to_dict(s: Signal) -> dict[str, Any]:

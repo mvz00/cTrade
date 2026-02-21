@@ -57,6 +57,24 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def ping_db() -> bool:
+    """Ping the database to check connectivity.
+
+    Returns ``True`` if a simple ``SELECT 1`` succeeds, ``False`` otherwise.
+    Never raises.
+    """
+    if _engine is None:
+        return False
+    try:
+        from sqlalchemy import text
+
+        async with _engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
 async def close_db() -> None:
     """Close the database engine and all connections."""
     global _engine, _session_factory

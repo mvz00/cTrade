@@ -17,6 +17,7 @@ from ctrade.analysis.technical.engine import TechnicalAnalysisEngine
 from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.core.enums import PositionStatus, SignalAction
 from ctrade.core.models import Signal
+from ctrade.db.persistence import fire_and_forget, is_db_ready, run_db_operation
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
@@ -87,6 +88,55 @@ class TradingOrchestrator:
         # Cap the log size
         if len(self._activity_log) > _MAX_ACTIVITY_LOG:
             self._activity_log = self._activity_log[-_MAX_ACTIVITY_LOG:]
+        # Write-through to audit log
+        fire_and_forget(self._persist_activity(entry))
+
+    # ---- Database persistence ----
+
+    async def hydrate_from_db(self) -> None:
+        """Load recent activity from the audit_log table."""
+        if not is_db_ready():
+            logger.info("DB not available — TradingOrchestrator starting with empty activity log")
+            return
+
+        async def _load(session, _resolver):
+            from sqlalchemy import select
+            from ctrade.db.models import AuditLogModel
+
+            stmt = (
+                select(AuditLogModel)
+                .where(AuditLogModel.event_type == "activity")
+                .order_by(AuditLogModel.created_at.desc())
+                .limit(_MAX_ACTIVITY_LOG)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            return [
+                {
+                    "time": r.created_at.isoformat(),
+                    "type": r.details.get("type", "info"),
+                    "pair": r.details.get("pair", ""),
+                    "message": r.details.get("message", ""),
+                    "details": r.details.get("details", {}),
+                }
+                for r in reversed(rows)
+            ]
+
+        loaded = await run_db_operation(_load, description="hydrate TradingOrchestrator")
+        if loaded:
+            self._activity_log = loaded
+            logger.info("Hydrated orchestrator activity log: %d entries", len(loaded))
+
+    async def _persist_activity(self, entry: dict[str, Any]) -> None:
+        """Write-through: persist an activity entry to the audit_log table."""
+        async def _do(session, _resolver):
+            from ctrade.db.models import AuditLogModel
+            audit = AuditLogModel(
+                event_type="activity",
+                entity_type="orchestrator",
+                details=entry,
+            )
+            session.add(audit)
+        await run_db_operation(_do, description="persist activity log")
 
     async def start(self, interval: int | None = None) -> bool:
         """Start the trading loop."""

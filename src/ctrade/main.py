@@ -62,6 +62,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             e,
         )
 
+    # Hydrate singletons from DB (non-fatal if anything goes wrong)
+    if _db_available:
+        try:
+            from ctrade.exchange.paper_engine import PaperEngine
+            from ctrade.notifications.alert_manager import AlertManager
+            from ctrade.strategy.orchestrator import TradingOrchestrator
+            from ctrade.strategy.signal_manager import SignalManager
+
+            await PaperEngine.get_instance().hydrate_from_db()
+            await SignalManager.get_instance().hydrate_from_db()
+            await AlertManager.get_instance().hydrate_from_db()
+            await TradingOrchestrator.get_instance().hydrate_from_db()
+            logger.info("All singletons hydrated from database")
+        except Exception as e:
+            logger.warning("Singleton hydration failed (non-fatal): %s", e)
+
     # Start event bus
     _event_bus = EventBus()
     await _event_bus.start()

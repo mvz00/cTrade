@@ -70,9 +70,15 @@ async def get_system_status() -> dict[str, Any]:
         store = RuntimeConfigStore.get()
         exchanges = store.list_exchanges()
 
+        from ctrade.db.engine import ping_db
+        db_ok = await ping_db()
+
         return {
             "api_server": {"status": "ok", "label": "Online"},
-            "database": {"status": "warning", "label": "In-memory mode"},
+            "database": {
+                "status": "ok" if db_ok else "warning",
+                "label": "Connected" if db_ok else "In-memory mode",
+            },
             "exchange": {
                 "status": "ok" if exchanges else "warning",
                 "label": f"{len(exchanges)} configured" if exchanges else "Not configured",

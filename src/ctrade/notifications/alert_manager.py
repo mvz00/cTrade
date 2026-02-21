@@ -1,12 +1,21 @@
-"""In-memory alert management system."""
+"""Alert management system with optional database persistence.
+
+In-memory alert configs and trigger history, with write-through to the
+database when available.
+"""
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, ClassVar
+
+from ctrade.db.persistence import fire_and_forget, is_db_ready, run_db_operation
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -34,7 +43,7 @@ class AlertTrigger:
 
 
 class AlertManager:
-    """In-memory alert system singleton."""
+    """Alert system singleton with DB write-through."""
 
     _instance: ClassVar[AlertManager | None] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
@@ -73,7 +82,8 @@ class AlertManager:
         )
         with self._data_lock:
             self._configs.append(config)
-            return self._config_to_dict(config)
+        fire_and_forget(self._persist_alert_config(config))
+        return self._config_to_dict(config)
 
     def list_alerts(self) -> list[dict[str, Any]]:
         with self._data_lock:
@@ -83,14 +93,19 @@ class AlertManager:
         with self._data_lock:
             before = len(self._configs)
             self._configs = [c for c in self._configs if c.id != alert_id]
-            return len(self._configs) < before
+            deleted = len(self._configs) < before
+        if deleted:
+            fire_and_forget(self._delete_alert_config_db(alert_id))
+        return deleted
 
     def toggle_alert(self, alert_id: str) -> dict[str, Any] | None:
         with self._data_lock:
             for c in self._configs:
                 if c.id == alert_id:
                     c.is_active = not c.is_active
-                    return self._config_to_dict(c)
+                    result = self._config_to_dict(c)
+                    fire_and_forget(self._update_alert_config_db(c))
+                    return result
             return None
 
     def check_price(self, symbol: str, price: float) -> list[dict[str, Any]]:
@@ -118,6 +133,8 @@ class AlertManager:
                     self._history.append(trigger)
                     triggered.append(self._trigger_to_dict(trigger))
                     config.is_active = False  # One-shot trigger
+                    fire_and_forget(self._persist_trigger(trigger))
+                    fire_and_forget(self._update_alert_config_db(config))
         return triggered
 
     def check_signal(self, symbol: str, action: str) -> list[dict[str, Any]]:
@@ -145,11 +162,90 @@ class AlertManager:
                     self._history.append(trigger)
                     triggered.append(self._trigger_to_dict(trigger))
                     config.is_active = False
+                    fire_and_forget(self._persist_trigger(trigger))
+                    fire_and_forget(self._update_alert_config_db(config))
         return triggered
 
     def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._data_lock:
             return [self._trigger_to_dict(t) for t in reversed(self._history)][:limit]
+
+    # ---- Database persistence ----
+
+    async def hydrate_from_db(self) -> None:
+        """Load alert configs and history from database."""
+        if not is_db_ready():
+            logger.info("DB not available — AlertManager starting with empty state")
+            return
+
+        async def _load(session, _resolver):
+            from sqlalchemy import select
+            from ctrade.db.mappers import orm_to_alert_config, orm_to_alert_trigger
+            from ctrade.db.models import AlertConfigModel, AlertHistoryModel
+
+            configs_result = await session.execute(select(AlertConfigModel))
+            configs = [orm_to_alert_config(c) for c in configs_result.scalars().all()]
+
+            history_stmt = (
+                select(AlertHistoryModel)
+                .order_by(AlertHistoryModel.created_at.desc())
+                .limit(200)
+            )
+            history_result = await session.execute(history_stmt)
+            history = [
+                orm_to_alert_trigger(h)
+                for h in reversed(history_result.scalars().all())
+            ]
+
+            return configs, history
+
+        loaded = await run_db_operation(_load, description="hydrate AlertManager")
+        if loaded:
+            configs, history = loaded
+            with self._data_lock:
+                self._configs = configs
+                self._history = history
+            logger.info(
+                "Hydrated AlertManager: %d configs, %d history entries",
+                len(configs),
+                len(history),
+            )
+
+    async def _persist_alert_config(self, config: AlertConfig) -> None:
+        """Write-through: persist an alert config."""
+        async def _do(session, _resolver):
+            from ctrade.db.mappers import alert_config_to_orm
+            orm = alert_config_to_orm(config)
+            await session.merge(orm)
+        await run_db_operation(_do, description="persist alert config")
+
+    async def _update_alert_config_db(self, config: AlertConfig) -> None:
+        """Write-through: update an existing alert config (e.g. toggle)."""
+        await self._persist_alert_config(config)
+
+    async def _delete_alert_config_db(self, alert_id: str) -> None:
+        """Write-through: delete an alert config from the database."""
+        async def _do(session, _resolver):
+            from sqlalchemy import delete
+            from ctrade.db.models import AlertConfigModel
+            try:
+                uid = uuid.UUID(alert_id)
+            except ValueError:
+                return
+            await session.execute(
+                delete(AlertConfigModel).where(AlertConfigModel.id == uid)
+            )
+        await run_db_operation(_do, description="delete alert config")
+
+    async def _persist_trigger(self, trigger: AlertTrigger) -> None:
+        """Write-through: persist a triggered alert to history."""
+        async def _do(session, _resolver):
+            from ctrade.db.mappers import alert_trigger_to_orm
+            orm = alert_trigger_to_orm(trigger)
+            session.add(orm)
+        await run_db_operation(_do, description="persist alert trigger")
+
+    # ---- Serialization ----
 
     @staticmethod
     def _config_to_dict(c: AlertConfig) -> dict[str, Any]:
