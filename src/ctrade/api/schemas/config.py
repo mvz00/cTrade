@@ -10,11 +10,15 @@ from pydantic import BaseModel, Field
 # ---- Trading Mode ----
 
 class TradingModeUpdate(BaseModel):
-    mode: Literal["paper", "live"]
+    mode: Literal["paper", "live"] | None = None
+    max_order_usdt: float | None = Field(None, gt=0, le=100_000)
+    max_open_positions: int | None = Field(None, ge=1, le=50)
 
 
 class TradingModeResponse(BaseModel):
     mode: str
+    max_order_usdt: float = 100.0
+    max_open_positions: int = 5
 
 
 # ---- Strategy ----

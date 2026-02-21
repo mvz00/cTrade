@@ -55,5 +55,8 @@ models/
 # Ruff
 .ruff_cache/
 
+# Runtime state (contains encrypted credentials)
+config/runtime_state.json
+
 # Claude Code
 .claude/

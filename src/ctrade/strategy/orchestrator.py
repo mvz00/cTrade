@@ -20,6 +20,9 @@ from ctrade.strategy.signal_manager import SignalManager
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+_MAX_ACTIVITY_LOG = 100
+
 
 class TradingOrchestrator:
     """Background trading loop singleton."""
@@ -33,6 +36,7 @@ class TradingOrchestrator:
         self._last_tick: datetime | None = None
         self._interval_seconds = 30
         self._ta_engine = TechnicalAnalysisEngine()
+        self._activity_log: list[dict[str, Any]] = []
 
     @classmethod
     def get_instance(cls) -> TradingOrchestrator:
@@ -56,6 +60,30 @@ class TradingOrchestrator:
             "interval_seconds": self._interval_seconds,
         }
 
+    def get_activity_log(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent activity log entries (newest first)."""
+        return list(reversed(self._activity_log[-limit:]))
+
+    def _log_activity(
+        self,
+        activity_type: str,
+        pair: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Add an entry to the activity log."""
+        entry = {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "type": activity_type,
+            "pair": pair,
+            "message": message,
+            "details": details or {},
+        }
+        self._activity_log.append(entry)
+        # Cap the log size
+        if len(self._activity_log) > _MAX_ACTIVITY_LOG:
+            self._activity_log = self._activity_log[-_MAX_ACTIVITY_LOG:]
+
     async def start(self, interval: int | None = None) -> bool:
         """Start the trading loop."""
         if self._running:
@@ -63,8 +91,21 @@ class TradingOrchestrator:
         if interval:
             self._interval_seconds = interval
         self._running = True
+
+        # Auto-add default pairs if none are watched
+        engine = PaperEngine.get_instance()
+        if not engine.get_watched_pairs():
+            for pair in _DEFAULT_PAIRS:
+                engine.add_watched_pair(pair)
+            logger.info("Auto-added %d default trading pairs", len(_DEFAULT_PAIRS))
+            self._log_activity(
+                "info", "ALL",
+                f"Auto-added {len(_DEFAULT_PAIRS)} default pairs: {', '.join(_DEFAULT_PAIRS)}",
+            )
+
         self._task = asyncio.create_task(self._run_loop())
         logger.info("Trading orchestrator started (interval=%ds)", self._interval_seconds)
+        self._log_activity("info", "ALL", "Auto-trading engine started")
         return True
 
     async def stop(self) -> bool:
@@ -80,6 +121,7 @@ class TradingOrchestrator:
                 pass
             self._task = None
         logger.info("Trading orchestrator stopped")
+        self._log_activity("info", "ALL", "Auto-trading engine stopped")
         return True
 
     async def _run_loop(self) -> None:
@@ -113,14 +155,17 @@ class TradingOrchestrator:
             store = RuntimeConfigStore.get()
             strategy = store.get_strategy()
             risk = store.get_risk()
+            trading = store.get_trading()
         except RuntimeError:
             strategy = {}
             risk = {}
+            trading = {}
 
         entry_threshold = strategy.get("entry_confidence_threshold", 0.70)
         exit_threshold = strategy.get("exit_confidence_threshold", 0.30)
         max_position_pct = risk.get("max_position_pct", 0.10)
-        max_open = store.get_trading().get("max_open_positions", 5) if store else 5
+        max_open = trading.get("max_open_positions", 5)
+        max_order_usdt = trading.get("max_order_usdt", 100.0)
         stop_loss_pct = risk.get("default_stop_loss_pct", 0.03)
         take_profit_pct = risk.get("default_take_profit_pct", 0.06)
 
@@ -130,6 +175,7 @@ class TradingOrchestrator:
                     pair, engine, market, signal_mgr,
                     entry_threshold, exit_threshold,
                     max_position_pct, max_open,
+                    max_order_usdt,
                     stop_loss_pct, take_profit_pct,
                     strategy,
                 )
@@ -146,6 +192,7 @@ class TradingOrchestrator:
         exit_threshold: float,
         max_position_pct: float,
         max_open: int,
+        max_order_usdt: float,
         stop_loss_pct: float,
         take_profit_pct: float,
         strategy: dict[str, Any],
@@ -174,6 +221,11 @@ class TradingOrchestrator:
         await self._check_sl_tp(pair, engine, market, stop_loss_pct, take_profit_pct)
 
         if signal.action == SignalAction.HOLD:
+            self._log_activity(
+                "signal", pair,
+                f"HOLD {pair} (confidence: {signal.confidence:.2f})",
+                {"confidence": signal.confidence, "action": "HOLD"},
+            )
             return
 
         # Risk checks
@@ -185,9 +237,9 @@ class TradingOrchestrator:
                 logger.debug("Max open positions reached (%d), skipping BUY for %s", max_open, pair)
                 return
 
-            # Calculate position size
+            # Calculate position size: min of USDT cap and portfolio % limit
             total_value = portfolio["total_value_usd"]
-            position_budget = total_value * max_position_pct
+            position_budget = min(max_order_usdt, total_value * max_position_pct)
             ticker = await market.get_ticker(pair)
             price = float(ticker.last_price)
             if price <= 0:
@@ -204,8 +256,17 @@ class TradingOrchestrator:
                     strategy_name="technical",
                 )
                 logger.info(
-                    "AUTO BUY %s: qty=%.6f @ %.2f (confidence=%.2f) → %s",
-                    pair, quantity, price, signal.confidence, order.status,
+                    "AUTO BUY %s: qty=%.6f @ %.2f (confidence=%.2f, budget=$%.2f) → %s",
+                    pair, quantity, price, signal.confidence, position_budget, order.status,
+                )
+                self._log_activity(
+                    "buy", pair,
+                    f"AUTO BUY {pair} {quantity:.6f} @ ${price:,.2f} (${position_budget:.2f})",
+                    {
+                        "quantity": quantity, "price": price,
+                        "budget": position_budget, "confidence": signal.confidence,
+                        "status": str(order.status),
+                    },
                 )
 
         elif signal.action == SignalAction.SELL:
@@ -214,7 +275,13 @@ class TradingOrchestrator:
             for pos in positions:
                 if pos["pair_symbol"] == pair and pos["side"] == "long":
                     engine.close_position(pos["id"])
+                    pnl = pos.get("unrealized_pnl", 0)
                     logger.info("AUTO SELL %s: closed position %s", pair, pos["id"])
+                    self._log_activity(
+                        "sell", pair,
+                        f"AUTO SELL {pair} — closed position (P&L: ${pnl:+.2f})",
+                        {"position_id": pos["id"], "pnl": pnl},
+                    )
 
     async def _check_sl_tp(
         self,
@@ -241,9 +308,20 @@ class TradingOrchestrator:
 
             if pos["side"] == "long":
                 pnl_pct = (current_price - entry_price) / entry_price
+                pnl_usd = (current_price - entry_price) * pos["quantity"]
                 if pnl_pct <= -stop_loss_pct:
                     engine.close_position(pos["id"])
                     logger.info("STOP LOSS triggered for %s (PnL: %.2f%%)", pair, pnl_pct * 100)
+                    self._log_activity(
+                        "sl", pair,
+                        f"STOP LOSS {pair} {pnl_pct * 100:+.1f}% (${pnl_usd:+.2f})",
+                        {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd},
+                    )
                 elif pnl_pct >= take_profit_pct:
                     engine.close_position(pos["id"])
                     logger.info("TAKE PROFIT triggered for %s (PnL: %.2f%%)", pair, pnl_pct * 100)
+                    self._log_activity(
+                        "tp", pair,
+                        f"TAKE PROFIT {pair} {pnl_pct * 100:+.1f}% (${pnl_usd:+.2f})",
+                        {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd},
+                    )

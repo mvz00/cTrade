@@ -73,6 +73,15 @@ export function usePortfolio() {
   });
 }
 
+export function useTicker(symbol: string) {
+  return useQuery({
+    queryKey: ['trading', 'ticker', symbol],
+    queryFn: () => api.getTicker(symbol),
+    refetchInterval: REFETCH_INTERVALS.TRADING,
+    enabled: !!symbol,
+  });
+}
+
 export function useEngineStatus() {
   return useQuery({
     queryKey: ['trading', 'engine'],
@@ -94,5 +103,13 @@ export function useStopEngine() {
   return useMutation({
     mutationFn: () => api.stopEngine(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['trading', 'engine'] }),
+  });
+}
+
+export function useActivityLog() {
+  return useQuery({
+    queryKey: ['trading', 'activity'],
+    queryFn: api.activityLog,
+    refetchInterval: REFETCH_INTERVALS.TRADING,
   });
 }

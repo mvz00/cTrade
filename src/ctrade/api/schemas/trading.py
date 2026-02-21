@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -85,3 +85,22 @@ class EngineStatusResponse(BaseModel):
 
 class EngineStartRequest(BaseModel):
     interval: int | None = Field(None, ge=5, le=3600)
+
+
+class TickerResponse(BaseModel):
+    symbol: str
+    last_price: float
+    bid: float
+    ask: float
+    high_24h: float
+    low_24h: float
+    volume_24h: float
+    change_pct_24h: float
+
+
+class ActivityEntry(BaseModel):
+    time: str
+    type: str
+    pair: str
+    message: str
+    details: dict[str, Any] = {}

@@ -1,20 +1,31 @@
-"""In-memory runtime configuration store.
+"""Runtime configuration store with JSON file persistence.
 
 Holds mutable copies of trading, risk, and strategy settings that can be
 updated at runtime via the API.  Initialised from Pydantic AppSettings on
-startup; changes persist until the server restarts.
+startup; persisted state is restored from ``config/runtime_state.json`` if
+it exists, so changes survive server restarts.
 """
 
 from __future__ import annotations
 
+import base64
+import json
+import logging
+import os
 import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, ClassVar
 
 from ctrade.security.vault import Vault
 from ctrade.settings import AppSettings
+
+logger = logging.getLogger(__name__)
+
+# Path to the persisted state file (project_root/config/runtime_state.json)
+_STATE_FILE = Path(__file__).resolve().parents[3] / "config" / "runtime_state.json"
 
 
 @dataclass
@@ -42,16 +53,18 @@ class ExchangeEntry:
 
 
 class RuntimeConfigStore:
-    """Singleton store for mutable runtime configuration."""
+    """Singleton store for mutable runtime configuration with disk persistence."""
 
     _instance: ClassVar[RuntimeConfigStore | None] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, settings: AppSettings) -> None:
+        # Start with defaults from settings
         self._trading: dict[str, Any] = {
             "mode": settings.trading.mode,
             "default_quote_currency": settings.trading.default_quote_currency,
             "max_open_positions": settings.trading.max_open_positions,
+            "max_order_usdt": settings.trading.max_order_usdt,
             "order_timeout_seconds": settings.trading.order_timeout_seconds,
         }
         self._strategy: dict[str, Any] = {
@@ -71,6 +84,9 @@ class RuntimeConfigStore:
         }
         self._exchanges: list[ExchangeEntry] = []
         self._data_lock = threading.Lock()
+
+        # Restore persisted state (overlays on top of defaults)
+        self._load_from_disk()
 
     # ---- Singleton lifecycle ----
 
@@ -99,6 +115,97 @@ class RuntimeConfigStore:
         with cls._lock:
             cls._instance = None
 
+    # ---- Persistence ----
+
+    def _save_to_disk(self) -> None:
+        """Persist current state to JSON file.  Never raises — logs errors."""
+        try:
+            exchanges_data = []
+            for ex in self._exchanges:
+                ex_dict: dict[str, Any] = {
+                    "id": ex.id,
+                    "name": ex.name,
+                    "exchange_type": ex.exchange_type,
+                    "api_key_encrypted": base64.b64encode(ex.api_key_encrypted).decode(),
+                    "api_secret_encrypted": base64.b64encode(ex.api_secret_encrypted).decode(),
+                    "passphrase_encrypted": (
+                        base64.b64encode(ex.passphrase_encrypted).decode()
+                        if ex.passphrase_encrypted
+                        else None
+                    ),
+                    "is_active": ex.is_active,
+                    "created_at": ex.created_at.isoformat(),
+                }
+                exchanges_data.append(ex_dict)
+
+            state = {
+                "trading": dict(self._trading),
+                "strategy": dict(self._strategy),
+                "risk": dict(self._risk),
+                "exchanges": exchanges_data,
+            }
+
+            # Ensure config directory exists
+            _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+            # Atomic write: write to temp file, then rename
+            tmp_path = _STATE_FILE.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+            # On Windows, os.replace is atomic within the same volume
+            os.replace(str(tmp_path), str(_STATE_FILE))
+            logger.debug("Config state persisted to %s", _STATE_FILE)
+
+        except Exception:
+            logger.exception("Failed to persist config state to disk")
+
+    def _load_from_disk(self) -> None:
+        """Restore state from JSON file if it exists.  Never raises."""
+        try:
+            if not _STATE_FILE.exists():
+                logger.debug("No persisted config state found at %s", _STATE_FILE)
+                return
+
+            raw = _STATE_FILE.read_text(encoding="utf-8")
+            state = json.loads(raw)
+
+            # Overlay trading, strategy, risk settings
+            if "trading" in state and isinstance(state["trading"], dict):
+                self._trading.update(state["trading"])
+
+            if "strategy" in state and isinstance(state["strategy"], dict):
+                self._strategy.update(state["strategy"])
+
+            if "risk" in state and isinstance(state["risk"], dict):
+                self._risk.update(state["risk"])
+
+            # Restore exchanges
+            if "exchanges" in state and isinstance(state["exchanges"], list):
+                self._exchanges = []
+                for ex_data in state["exchanges"]:
+                    passphrase_enc = ex_data.get("passphrase_encrypted")
+                    entry = ExchangeEntry(
+                        id=ex_data["id"],
+                        name=ex_data["name"],
+                        exchange_type=ex_data["exchange_type"],
+                        api_key_encrypted=base64.b64decode(ex_data["api_key_encrypted"]),
+                        api_secret_encrypted=base64.b64decode(ex_data["api_secret_encrypted"]),
+                        passphrase_encrypted=(
+                            base64.b64decode(passphrase_enc) if passphrase_enc else None
+                        ),
+                        is_active=ex_data.get("is_active", True),
+                        created_at=datetime.fromisoformat(ex_data["created_at"]),
+                    )
+                    self._exchanges.append(entry)
+
+            logger.info(
+                "Restored config state from disk (%d exchanges)",
+                len(self._exchanges),
+            )
+
+        except Exception:
+            logger.exception("Failed to load config state from disk — using defaults")
+
     # ---- Trading config ----
 
     def get_trading(self) -> dict[str, Any]:
@@ -108,7 +215,9 @@ class RuntimeConfigStore:
     def update_trading(self, updates: dict[str, Any]) -> dict[str, Any]:
         with self._data_lock:
             self._trading.update(updates)
-            return dict(self._trading)
+            result = dict(self._trading)
+        self._save_to_disk()
+        return result
 
     # ---- Strategy config ----
 
@@ -130,7 +239,9 @@ class RuntimeConfigStore:
                     f"Strategy weights must sum to 1.0, got {weights:.3f}"
                 )
             self._strategy.update(updates)
-            return dict(self._strategy)
+            result = dict(self._strategy)
+        self._save_to_disk()
+        return result
 
     # ---- Risk config ----
 
@@ -141,7 +252,9 @@ class RuntimeConfigStore:
     def update_risk(self, updates: dict[str, Any]) -> dict[str, Any]:
         with self._data_lock:
             self._risk.update(updates)
-            return dict(self._risk)
+            result = dict(self._risk)
+        self._save_to_disk()
+        return result
 
     # ---- Exchange management ----
 
@@ -168,7 +281,9 @@ class RuntimeConfigStore:
         )
         with self._data_lock:
             self._exchanges.append(entry)
-            return entry.to_public_dict()
+            result = entry.to_public_dict()
+        self._save_to_disk()
+        return result
 
     def get_exchange_entry(self, exchange_id: str) -> ExchangeEntry | None:
         with self._data_lock:
@@ -181,4 +296,7 @@ class RuntimeConfigStore:
         with self._data_lock:
             before = len(self._exchanges)
             self._exchanges = [ex for ex in self._exchanges if ex.id != exchange_id]
-            return len(self._exchanges) < before
+            removed = len(self._exchanges) < before
+        if removed:
+            self._save_to_disk()
+        return removed

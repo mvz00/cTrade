@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from ctrade.api.schemas.trading import (
+    ActivityEntry,
     AddPairRequest,
     EngineStartRequest,
     EngineStatusResponse,
@@ -13,7 +14,9 @@ from ctrade.api.schemas.trading import (
     PlaceOrderRequest,
     PortfolioResponse,
     PositionResponse,
+    TickerResponse,
 )
+from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.strategy.orchestrator import TradingOrchestrator
@@ -51,9 +54,9 @@ async def remove_pair(symbol: str) -> None:
 
 @router.get("/available-pairs", response_model=list[str])
 async def available_pairs() -> list[str]:
-    """List available trading pairs (from market data provider)."""
+    """List available trading pairs (from exchange or simulated fallback)."""
     market = MarketDataProvider.get_instance()
-    return market.get_available_pairs()
+    return await market.get_available_pairs()
 
 
 # ---- Orders ----
@@ -108,9 +111,47 @@ async def close_position(position_id: str) -> OrderResponse:
 
 @router.get("/portfolio", response_model=PortfolioResponse)
 async def get_portfolio() -> PortfolioResponse:
-    """Get portfolio summary."""
+    """Get portfolio summary.  In live mode, fetches real exchange balances."""
+    store = RuntimeConfigStore.get()
+    mode = store.get_trading()["mode"]
+
+    if mode == "live":
+        market = MarketDataProvider.get_instance()
+        live_portfolio = await market.fetch_exchange_portfolio()
+        if live_portfolio:
+            return PortfolioResponse(**live_portfolio)
+        # Fall through to paper if live fetch fails (no exchange configured)
+
     engine = PaperEngine.get_instance()
     return PortfolioResponse(**engine.get_portfolio())
+
+
+# ---- Ticker ----
+
+@router.get("/ticker/{symbol:path}", response_model=TickerResponse)
+async def get_ticker(symbol: str) -> TickerResponse:
+    """Get current ticker (price) for a symbol."""
+    market = MarketDataProvider.get_instance()
+    ticker = await market.get_ticker(symbol)
+    return TickerResponse(
+        symbol=ticker.pair_symbol,
+        last_price=float(ticker.last_price),
+        bid=float(ticker.bid),
+        ask=float(ticker.ask),
+        high_24h=float(ticker.high_24h),
+        low_24h=float(ticker.low_24h),
+        volume_24h=float(ticker.volume_24h),
+        change_pct_24h=ticker.change_pct_24h,
+    )
+
+
+# ---- Activity Log ----
+
+@router.get("/activity", response_model=list[ActivityEntry])
+async def activity_log() -> list[ActivityEntry]:
+    """Get recent activity log from the trading engine."""
+    orch = TradingOrchestrator.get_instance()
+    return [ActivityEntry(**e) for e in orch.get_activity_log()]
 
 
 # ---- Engine Control ----

@@ -30,6 +30,16 @@ export interface EquityPoint {
 
 export interface TradingModeResponse {
   mode: 'paper' | 'live';
+  max_order_usdt?: number;
+  max_open_positions?: number;
+}
+
+export interface ActivityEntry {
+  time: string;
+  type: 'signal' | 'buy' | 'sell' | 'sl' | 'tp' | 'info';
+  pair: string;
+  message: string;
+  details: Record<string, any>;
 }
 
 export interface StrategyConfig {
@@ -111,6 +121,17 @@ export interface EngineStatus {
   tick_count: number;
   last_tick: string | null;
   interval_seconds: number;
+}
+
+export interface Ticker {
+  symbol: string;
+  last_price: number;
+  bid: number;
+  ask: number;
+  high_24h: number;
+  low_24h: number;
+  volume_24h: number;
+  change_pct_24h: number;
 }
 
 export interface PlaceOrderRequest {
@@ -206,7 +227,9 @@ export interface AlertHistory {
 }
 
 export interface TradingModeUpdate {
-  mode: 'paper' | 'live';
+  mode?: 'paper' | 'live';
+  max_order_usdt?: number;
+  max_open_positions?: number;
 }
 
 export interface StrategyConfigUpdate {

@@ -44,10 +44,23 @@ def event_bus() -> EventBus:
 
 @pytest.fixture(autouse=True)
 def _init_config_store(app_settings):
-    """Initialize the runtime config store for every test."""
+    """Initialize the runtime config store for every test.
+
+    Removes the persisted state file so tests start with clean defaults.
+    """
+    from ctrade.core.config_store import _STATE_FILE
+
+    # Remove any persisted state so tests get clean defaults
+    if _STATE_FILE.exists():
+        _STATE_FILE.unlink()
+
     RuntimeConfigStore.initialize(app_settings)
     yield
     RuntimeConfigStore.reset()
+
+    # Clean up any state file written during the test
+    if _STATE_FILE.exists():
+        _STATE_FILE.unlink()
 
 
 @pytest.fixture

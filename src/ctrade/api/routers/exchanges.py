@@ -15,6 +15,7 @@ from ctrade.api.schemas.config import (
     ExchangeTestResponse,
 )
 from ctrade.core.config_store import RuntimeConfigStore
+from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.security.vault import Vault
 from ctrade.settings import AppSettings
 
@@ -99,6 +100,8 @@ async def add_exchange(
         vault=vault,
         passphrase=body.passphrase,
     )
+    # New exchange → refresh available pairs from it
+    MarketDataProvider.get_instance().clear_pairs_cache()
     return ExchangeResponse(**result)
 
 
@@ -108,6 +111,8 @@ async def delete_exchange(exchange_id: str) -> None:
     store = RuntimeConfigStore.get()
     if not store.remove_exchange(exchange_id):
         raise HTTPException(status_code=404, detail="Exchange not found")
+    # Exchange removed → refresh available pairs
+    MarketDataProvider.get_instance().clear_pairs_cache()
 
 
 @router.post("/{exchange_id}/test", response_model=ExchangeTestResponse)

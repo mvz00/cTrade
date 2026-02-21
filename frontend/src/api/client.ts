@@ -19,6 +19,8 @@ import type {
   Position,
   Portfolio,
   EngineStatus,
+  Ticker,
+  ActivityEntry,
   Signal,
   IndicatorData,
   BacktestRequest,
@@ -92,6 +94,9 @@ export const api = {
   closePosition: (id: string) =>
     apiFetch<Order>(`/trading/positions/${id}/close`, { method: 'POST' }),
   portfolio: () => apiFetch<Portfolio>('/trading/portfolio'),
+  getTicker: (symbol: string) =>
+    apiFetch<Ticker>(`/trading/ticker/${encodeURIComponent(symbol)}`),
+  activityLog: () => apiFetch<ActivityEntry[]>('/trading/activity'),
   engineStatus: () => apiFetch<EngineStatus>('/trading/engine/status'),
   startEngine: (interval?: number) =>
     apiFetch<EngineStatus>('/trading/engine/start', { method: 'POST', body: interval ? JSON.stringify({ interval }) : '{}' }),
