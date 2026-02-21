@@ -31,7 +31,7 @@ export function TradingPage() {
   const closePos = useClosePosition();
   const startEngine = useStartEngine();
   const stopEngine = useStopEngine();
-  const { success, error: showError } = useToast();
+  const { toast } = useToast();
 
   const [selectedPair, setSelectedPair] = useState('BTC/USDT');
   const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy');
@@ -56,15 +56,15 @@ export function TradingPage() {
             </Badge>
             {engine?.running ? (
               <Button variant="danger" onClick={() => stopEngine.mutate(undefined, {
-                onSuccess: () => success('Engine stopped'),
-                onError: (e) => showError(e.message),
+                onSuccess: () => toast('Engine stopped', 'success'),
+                onError: (e) => toast(e.message, 'error'),
               })}>
                 <Square size={14} /> Stop Engine
               </Button>
             ) : (
               <Button onClick={() => startEngine.mutate(undefined, {
-                onSuccess: () => success('Engine started'),
-                onError: (e) => showError(e.message),
+                onSuccess: () => toast('Engine started', 'success'),
+                onError: (e) => toast(e.message, 'error'),
               })}>
                 <Play size={14} /> Start Engine
               </Button>
@@ -98,14 +98,14 @@ export function TradingPage() {
               <option value="">Select pair...</option>
               {unwatchedPairs.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            <Button onClick={() => { if (newPair) addPair.mutate(newPair, { onSuccess: () => { success(`Added ${newPair}`); setNewPair(''); }, onError: (e) => showError(e.message) }); }} disabled={!newPair}><Plus size={14} /></Button>
+            <Button onClick={() => { if (newPair) addPair.mutate(newPair, { onSuccess: () => { toast(`Added ${newPair}`, 'success'); setNewPair(''); }, onError: (e) => toast(e.message, 'error') }); }} disabled={!newPair}><Plus size={14} /></Button>
           </div>
         </Card>
 
         <Card>
           <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider mb-3">Place Order</h3>
           <div className="space-y-3">
-            <Select label="Pair" value={selectedPair} onChange={e => setSelectedPair(e.target.value)}
+            <Select label="Pair" value={selectedPair} onChange={v => setSelectedPair(v)}
               options={[...(pairs || []).map(p => ({ value: p.symbol, label: p.symbol })), ...unwatchedPairs.map(p => ({ value: p, label: p }))]} />
             <div className="flex gap-2">
               <button onClick={() => setOrderSide('buy')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${orderSide === 'buy' ? 'bg-ct-green text-white' : 'bg-ct-bg-hover text-ct-text-muted'}`}>Buy</button>
@@ -113,7 +113,7 @@ export function TradingPage() {
             </div>
             <NumberInput label="Quantity" value={orderQty} onChange={v => setOrderQty(v)} min={0.0001} step={0.001} />
             <Button className="w-full" variant={orderSide === 'buy' ? 'primary' : 'danger'}
-              onClick={() => placeOrder.mutate({ symbol: selectedPair, side: orderSide, order_type: 'market', quantity: orderQty }, { onSuccess: (o) => success(`${orderSide.toUpperCase()} ${o.status}`), onError: (e) => showError(e.message) })}
+              onClick={() => placeOrder.mutate({ symbol: selectedPair, side: orderSide, order_type: 'market', quantity: orderQty }, { onSuccess: (o) => toast(`${orderSide.toUpperCase()} ${o.status}`, 'success'), onError: (e) => toast(e.message, 'error') })}
               disabled={placeOrder.isPending}>
               <ArrowUpDown size={14} /> {orderSide === 'buy' ? 'Buy' : 'Sell'} {selectedPair}
             </Button>
@@ -136,7 +136,7 @@ export function TradingPage() {
                       <td>{formatNumber(p.quantity, 6)}</td>
                       <td>{formatUSD(p.entry_price)}</td>
                       <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>{formatUSD(p.unrealized_pnl ?? 0)}</td>
-                      <td><button onClick={() => closePos.mutate(p.id, { onSuccess: () => success('Closed'), onError: (e) => showError(e.message) })} className="text-ct-text-dim hover:text-ct-red"><X size={14} /></button></td>
+                      <td><button onClick={() => closePos.mutate(p.id, { onSuccess: () => toast('Position closed', 'success'), onError: (e) => toast(e.message, 'error') })} className="text-ct-text-dim hover:text-ct-red"><X size={14} /></button></td>
                     </tr>
                   ))}
                 </tbody>
