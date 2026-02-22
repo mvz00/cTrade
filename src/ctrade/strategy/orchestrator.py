@@ -23,10 +23,12 @@ from ctrade.exchange.engine_resolver import get_engine
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+from ctrade.feeds.cvd import CVDFeed
 from ctrade.feeds.derivatives import DerivativesFeed
 from ctrade.feeds.market_sentiment import MarketSentimentFeed
 from ctrade.feeds.onchain import OnChainFeed
 from ctrade.feeds.sentiment import SentimentFeed
+from ctrade.feeds.social_velocity import SocialVelocityFeed
 from ctrade.strategy.signal_manager import SignalManager
 
 logger = logging.getLogger(__name__)
@@ -277,6 +279,9 @@ class TradingOrchestrator:
         # ---- Rank pairs by volatility (biggest movers first) ----
         ranked_pairs = self._rank_pairs_by_momentum(pairs)
 
+        strategy_mode = strategy.get("strategy_mode", "long_only")
+        short_min_1h_change_pct = strategy.get("short_min_1h_change_pct", 2.0)
+
         for pair in ranked_pairs:
             try:
                 await self._process_pair(
@@ -286,6 +291,7 @@ class TradingOrchestrator:
                     max_order_usdt,
                     stop_loss_pct, take_profit_pct,
                     strategy,
+                    strategy_mode, short_min_1h_change_pct,
                 )
             except Exception:
                 logger.exception("Error processing pair %s", pair)
@@ -349,15 +355,19 @@ class TradingOrchestrator:
         stop_loss_pct: float,
         take_profit_pct: float,
         strategy: dict[str, Any],
+        strategy_mode: str = "long_only",
+        short_min_1h_change_pct: float = 2.0,
     ) -> None:
-        """Analyze a single pair using 5-way signal fusion and potentially trade.
+        """Analyze a single pair using 7-way signal fusion and potentially trade.
 
-        Blends up to five intelligence sources with configurable weights:
-        * Technical analysis (indicators + CMC momentum) — default 0.35
-        * Sentiment (FinBERT-classified news/social)   — default 0.15
-        * On-chain metrics (hash rate, volume, etc.)    — default 0.10
-        * Derivatives (funding rate, OI, order book)    — default 0.20
-        * Market sentiment (F&G, L/S ratio, liq data)   — default 0.20
+        Blends up to seven intelligence sources with configurable weights:
+        * Technical analysis (indicators + CMC momentum) — default 0.30
+        * Sentiment (FinBERT-classified news/social)     — default 0.10
+        * On-chain metrics (hash rate, volume, etc.)     — default 0.08
+        * Derivatives (funding rate, OI, order book)     — default 0.17
+        * Market sentiment (F&G, L/S ratio, liq data)    — default 0.17
+        * CVD (cumulative volume delta divergence)       — default 0.10
+        * Social velocity (mention spike detection)      — default 0.08
 
         If a source is unavailable (returns None), its weight is redistributed
         proportionally to the available sources.
@@ -407,14 +417,24 @@ class TradingOrchestrator:
         mkt_sentiment_feed = MarketSentimentFeed.get_instance()
         market_sentiment_score = mkt_sentiment_feed.get_market_sentiment_score(pair)
 
+        # 6. CVD score (cumulative volume delta divergence)
+        cvd_feed = CVDFeed.get_instance()
+        cvd_score = cvd_feed.get_cvd_score(pair)
+
+        # 7. Social velocity score (mention spike detection)
+        social_velocity_feed = SocialVelocityFeed.get_instance()
+        social_velocity_score = social_velocity_feed.get_social_velocity_score(pair)
+
         # ---- Weighted fusion with proportional redistribution ----
 
         raw_weights = {
-            "technical": strategy.get("technical_weight", 0.35),
-            "sentiment": strategy.get("sentiment_weight", 0.15),
-            "onchain": strategy.get("onchain_weight", 0.10),
-            "derivatives": strategy.get("derivatives_weight", 0.20),
-            "market_sentiment": strategy.get("market_sentiment_weight", 0.20),
+            "technical": strategy.get("technical_weight", 0.30),
+            "sentiment": strategy.get("sentiment_weight", 0.10),
+            "onchain": strategy.get("onchain_weight", 0.08),
+            "derivatives": strategy.get("derivatives_weight", 0.17),
+            "market_sentiment": strategy.get("market_sentiment_weight", 0.17),
+            "cvd": strategy.get("cvd_weight", 0.10),
+            "social_velocity": strategy.get("social_velocity_weight", 0.08),
         }
 
         scores: dict[str, float] = {"technical": tech_score}
@@ -426,6 +446,10 @@ class TradingOrchestrator:
             scores["derivatives"] = derivatives_score
         if market_sentiment_score is not None:
             scores["market_sentiment"] = market_sentiment_score
+        if cvd_score is not None:
+            scores["cvd"] = cvd_score
+        if social_velocity_score is not None:
+            scores["social_velocity"] = social_velocity_score
 
         # Redistribute unavailable weights proportionally
         available_weight = sum(raw_weights[k] for k in scores)
@@ -500,6 +524,12 @@ class TradingOrchestrator:
         if market_sentiment_score is not None:
             contributing_factors["market_sentiment"] = mkt_sentiment_feed.get_contributing_factors(pair)
 
+        if cvd_score is not None:
+            contributing_factors["cvd"] = cvd_feed.get_contributing_factors(pair)
+
+        if social_velocity_score is not None:
+            contributing_factors["social_velocity"] = social_velocity_feed.get_contributing_factors(pair)
+
         contributing_factors["fusion"] = {
             "composite": composite,
             "weights": {k: round(v, 4) for k, v in weights.items()},
@@ -526,6 +556,8 @@ class TradingOrchestrator:
             onchain_score=onchain_score,
             derivatives_score=derivatives_score,
             market_sentiment_score=market_sentiment_score,
+            cvd_score=cvd_score,
+            social_velocity_score=social_velocity_score,
             strategy_name=strategy_name,
             contributing_factors=contributing_factors,
         )
@@ -573,116 +605,260 @@ class TradingOrchestrator:
         portfolio = await engine.get_portfolio()
         open_positions = portfolio["open_positions"]
 
-        if signal.action == SignalAction.BUY:
-            if open_positions >= max_open:
-                logger.debug("Max open positions reached (%d), skipping BUY for %s", max_open, pair)
-                return
+        # ---- Execute based on strategy mode ----
+        if strategy_mode == "long_only":
+            await self._execute_long_only(
+                signal, pair, engine, market, signal_mgr,
+                portfolio, open_positions, max_open, max_order_usdt,
+                max_position_pct, composite, agreement,
+            )
+        elif strategy_mode == "short_only":
+            await self._execute_short_only(
+                signal, pair, engine, market, signal_mgr,
+                portfolio, open_positions, max_open, max_order_usdt,
+                max_position_pct, composite, agreement,
+                short_min_1h_change_pct,
+            )
+        elif strategy_mode == "both":
+            await self._execute_both(
+                signal, pair, engine, market, signal_mgr,
+                portfolio, open_positions, max_open, max_order_usdt,
+                max_position_pct, composite, agreement,
+                short_min_1h_change_pct,
+            )
 
-            # Skip if we already have an open position for this pair
-            existing_positions = engine.get_positions(status="open")
-            if any(p["pair_symbol"] == pair for p in existing_positions):
-                logger.debug("Already have open position for %s, skipping BUY", pair)
-                return
+    # ------------------------------------------------------------------
+    # Strategy mode execution helpers
+    # ------------------------------------------------------------------
 
-            # Calculate position size: min of USDT cap and portfolio % limit
-            total_value = portfolio["total_value_usd"]
-            position_budget = min(max_order_usdt, total_value * max_position_pct)
-            ticker = await market.get_ticker(pair)
-            price = float(ticker.last_price)
-            if price <= 0:
-                return
-            quantity = position_budget / price
+    async def _open_position(
+        self,
+        pair: str,
+        side: str,
+        engine: Any,
+        market: MarketDataProvider,
+        signal: Signal,
+        portfolio: dict,
+        max_order_usdt: float,
+        max_position_pct: float,
+        composite: float,
+        agreement: str,
+        cmc_info: dict | None = None,
+    ) -> None:
+        """Open a new position (long or short) with standard position sizing."""
+        total_value = portfolio["total_value_usd"]
+        position_budget = min(max_order_usdt, total_value * max_position_pct)
+        ticker = await market.get_ticker(pair)
+        price = float(ticker.last_price)
+        if price <= 0:
+            return
+        quantity = position_budget / price
 
-            strategy_label = signal.strategy_name or "technical"
+        strategy_label = signal.strategy_name or "technical"
+        momentum_tag = ""
+        if cmc_info:
+            pct_1h = cmc_info.get("pct_change_1h", 0)
+            momentum_tag = f" [1h: {pct_1h:+.1f}%]"
 
-            # Get momentum context for activity log
-            cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
-            momentum_tag = ""
-            if cmc_info:
-                pct_1h = cmc_info["pct_change_1h"]
-                momentum_tag = f" [1h: {pct_1h:+.1f}%]"
+        side_label = "BUY" if side == "buy" else "SHORT"
+        log_type = "buy" if side == "buy" else "sell"
 
-            if quantity > 0:
-                order = await engine.place_order(
-                    symbol=pair,
-                    side="buy",
-                    order_type="market",
-                    quantity=quantity,
-                    signal_id=str(signal.id),
-                    strategy_name=strategy_label,
+        if quantity > 0:
+            order = await engine.place_order(
+                symbol=pair,
+                side=side,
+                order_type="market",
+                quantity=quantity,
+                signal_id=str(signal.id),
+                strategy_name=strategy_label,
+            )
+            order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+            logger.info(
+                "AUTO %s %s: qty=%.6f @ %.2f (confidence=%.2f, budget=$%.2f, strategy=%s) → %s",
+                side_label, pair, quantity, price, signal.confidence, position_budget,
+                strategy_label, order_status,
+            )
+
+            if order_status == "rejected":
+                self._log_activity(
+                    "error", pair,
+                    f"{side_label} REJECTED {pair}: {order.error_message or 'unknown error'}",
+                    {
+                        "quantity": quantity, "price": price,
+                        "budget": position_budget, "confidence": signal.confidence,
+                        "composite": composite, "agreement": agreement,
+                        "strategy": strategy_label,
+                        "status": order_status,
+                        "error": order.error_message,
+                    },
                 )
-                order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
-                logger.info(
-                    "AUTO BUY %s: qty=%.6f @ %.2f (confidence=%.2f, budget=$%.2f, strategy=%s) → %s",
-                    pair, quantity, price, signal.confidence, position_budget,
-                    strategy_label, order_status,
+            else:
+                self._log_activity(
+                    log_type, pair,
+                    f"AUTO {side_label} {pair} {quantity:.6f} @ ${price:,.2f}{momentum_tag} → {order_status}",
+                    {
+                        "quantity": quantity, "price": price,
+                        "budget": position_budget, "confidence": signal.confidence,
+                        "composite": composite, "agreement": agreement,
+                        "strategy": strategy_label,
+                        "status": order_status,
+                        "momentum": cmc_info,
+                    },
                 )
+            self._publish(EventTypes.ORDER_CREATED, {
+                "pair": pair, "side": side, "quantity": quantity,
+                "price": price, "status": order_status,
+            })
 
-                if order_status == "rejected":
+    async def _close_positions(
+        self,
+        pair: str,
+        target_side: str,
+        engine: Any,
+        composite: float,
+        agreement: str,
+    ) -> None:
+        """Close all open positions for a pair on a given side."""
+        positions = engine.get_positions(status="open")
+        for pos in positions:
+            if pos["pair_symbol"] == pair and pos["side"] == target_side:
+                close_order = await engine.close_position(pos["id"])
+                pnl = pos.get("unrealized_pnl", 0)
+
+                if close_order and hasattr(close_order, "status"):
+                    close_status = close_order.status.value if hasattr(close_order.status, "value") else str(close_order.status)
+                else:
+                    close_status = "unknown"
+
+                side_label = "SELL" if target_side == "long" else "CLOSE SHORT"
+                log_type = "sell" if target_side == "long" else "buy"
+
+                if close_status == "rejected":
+                    logger.warning("AUTO %s %s: REJECTED — %s", side_label, pair, close_order.error_message)
                     self._log_activity(
                         "error", pair,
-                        f"BUY REJECTED {pair}: {order.error_message or 'unknown error'}",
-                        {
-                            "quantity": quantity, "price": price,
-                            "budget": position_budget, "confidence": signal.confidence,
-                            "composite": composite, "agreement": agreement,
-                            "strategy": strategy_label,
-                            "status": order_status,
-                            "error": order.error_message,
-                        },
+                        f"{side_label} REJECTED {pair}: {close_order.error_message or 'unknown error'}",
+                        {"position_id": pos["id"], "pnl": pnl,
+                         "composite": composite, "agreement": agreement,
+                         "error": close_order.error_message},
                     )
                 else:
+                    logger.info("AUTO %s %s: closed position %s → %s", side_label, pair, pos["id"], close_status)
                     self._log_activity(
-                        "buy", pair,
-                        f"AUTO BUY {pair} {quantity:.6f} @ ${price:,.2f}{momentum_tag} → {order_status}",
-                        {
-                            "quantity": quantity, "price": price,
-                            "budget": position_budget, "confidence": signal.confidence,
-                            "composite": composite, "agreement": agreement,
-                            "strategy": strategy_label,
-                            "status": order_status,
-                            "momentum": cmc_info,
-                        },
+                        log_type, pair,
+                        f"AUTO {side_label} {pair} — closed position (P&L: ${pnl:+.2f}) → {close_status}",
+                        {"position_id": pos["id"], "pnl": pnl,
+                         "composite": composite, "agreement": agreement},
                     )
-                self._publish(EventTypes.ORDER_CREATED, {
-                    "pair": pair, "side": "buy", "quantity": quantity,
-                    "price": price, "status": order_status,
-                })
+                    self._publish(EventTypes.POSITION_CLOSED, {
+                        "pair": pair, "position_id": pos["id"],
+                        "pnl": pnl, "reason": "signal",
+                    })
+
+    async def _execute_long_only(
+        self, signal: Signal, pair: str, engine: Any, market: MarketDataProvider,
+        signal_mgr: SignalManager, portfolio: dict, open_positions: int,
+        max_open: int, max_order_usdt: float, max_position_pct: float,
+        composite: float, agreement: str,
+    ) -> None:
+        """Long-only mode: BUY opens long, SELL closes long."""
+        cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
+
+        if signal.action == SignalAction.BUY:
+            if open_positions >= max_open:
+                return
+            existing = engine.get_positions(status="open")
+            if any(p["pair_symbol"] == pair and p["side"] == "long" for p in existing):
+                return
+            await self._open_position(
+                pair, "buy", engine, market, signal, portfolio,
+                max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+            )
 
         elif signal.action == SignalAction.SELL:
-            # Close any open long position
-            positions = engine.get_positions(status="open")
-            for pos in positions:
-                if pos["pair_symbol"] == pair and pos["side"] == "long":
-                    close_order = await engine.close_position(pos["id"])
-                    pnl = pos.get("unrealized_pnl", 0)
+            await self._close_positions(pair, "long", engine, composite, agreement)
 
-                    if close_order and hasattr(close_order, "status"):
-                        close_status = close_order.status.value if hasattr(close_order.status, "value") else str(close_order.status)
-                    else:
-                        close_status = "unknown"
+    async def _execute_short_only(
+        self, signal: Signal, pair: str, engine: Any, market: MarketDataProvider,
+        signal_mgr: SignalManager, portfolio: dict, open_positions: int,
+        max_open: int, max_order_usdt: float, max_position_pct: float,
+        composite: float, agreement: str, short_min_1h_change_pct: float,
+    ) -> None:
+        """Short-only mode: SELL opens short (momentum filter), BUY closes short."""
+        cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
 
-                    if close_status == "rejected":
-                        logger.warning("AUTO SELL %s: REJECTED — %s", pair, close_order.error_message)
-                        self._log_activity(
-                            "error", pair,
-                            f"SELL REJECTED {pair}: {close_order.error_message or 'unknown error'}",
-                            {"position_id": pos["id"], "pnl": pnl,
-                             "composite": composite, "agreement": agreement,
-                             "error": close_order.error_message},
-                        )
-                    else:
-                        logger.info("AUTO SELL %s: closed position %s → %s", pair, pos["id"], close_status)
-                        self._log_activity(
-                            "sell", pair,
-                            f"AUTO SELL {pair} — closed position (P&L: ${pnl:+.2f}) → {close_status}",
-                            {"position_id": pos["id"], "pnl": pnl,
-                             "composite": composite, "agreement": agreement},
-                        )
-                        self._publish(EventTypes.POSITION_CLOSED, {
-                            "pair": pair, "position_id": pos["id"],
-                            "pnl": pnl, "reason": "signal",
-                        })
+        if signal.action == SignalAction.SELL:
+            # Momentum filter: only short high-volatility pairs
+            if cmc_info is None or abs(cmc_info.get("pct_change_1h", 0)) < short_min_1h_change_pct:
+                pct = cmc_info["pct_change_1h"] if cmc_info else "N/A"
+                self._log_activity(
+                    "signal", pair,
+                    f"SHORT_ONLY skip {pair}: 1h change {pct}% < {short_min_1h_change_pct}% threshold",
+                    {"pair": pair, "pct_change_1h": pct, "threshold": short_min_1h_change_pct},
+                )
+                return
+
+            if open_positions >= max_open:
+                return
+            existing = engine.get_positions(status="open")
+            if any(p["pair_symbol"] == pair and p["side"] == "short" for p in existing):
+                return
+            await self._open_position(
+                pair, "sell", engine, market, signal, portfolio,
+                max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+            )
+
+        elif signal.action == SignalAction.BUY:
+            await self._close_positions(pair, "short", engine, composite, agreement)
+
+    async def _execute_both(
+        self, signal: Signal, pair: str, engine: Any, market: MarketDataProvider,
+        signal_mgr: SignalManager, portfolio: dict, open_positions: int,
+        max_open: int, max_order_usdt: float, max_position_pct: float,
+        composite: float, agreement: str, short_min_1h_change_pct: float,
+    ) -> None:
+        """Both mode: BUY closes short + opens long, SELL closes long + opens short."""
+        cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
+
+        if signal.action == SignalAction.BUY:
+            # Close any short first
+            await self._close_positions(pair, "short", engine, composite, agreement)
+
+            # Re-check open count after closing
+            portfolio = await engine.get_portfolio()
+            open_positions = portfolio["open_positions"]
+
+            if open_positions >= max_open:
+                return
+            existing = engine.get_positions(status="open")
+            if any(p["pair_symbol"] == pair and p["side"] == "long" for p in existing):
+                return
+            await self._open_position(
+                pair, "buy", engine, market, signal, portfolio,
+                max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+            )
+
+        elif signal.action == SignalAction.SELL:
+            # Close any long first
+            await self._close_positions(pair, "long", engine, composite, agreement)
+
+            # Momentum filter for short entry
+            if cmc_info is None or abs(cmc_info.get("pct_change_1h", 0)) < short_min_1h_change_pct:
+                return
+
+            # Re-check open count after closing
+            portfolio = await engine.get_portfolio()
+            open_positions = portfolio["open_positions"]
+
+            if open_positions >= max_open:
+                return
+            existing = engine.get_positions(status="open")
+            if any(p["pair_symbol"] == pair and p["side"] == "short" for p in existing):
+                return
+            await self._open_position(
+                pair, "sell", engine, market, signal, portfolio,
+                max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+            )
 
     async def _check_sl_tp(
         self,
@@ -746,6 +922,55 @@ class TradingOrchestrator:
                         self._log_activity(
                             "tp", pair,
                             f"TAKE PROFIT {pair} {pnl_pct * 100:+.1f}% (${pnl_usd:+.2f})",
+                            {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd},
+                        )
+                        self._publish(EventTypes.TAKE_PROFIT_HIT, {
+                            "pair": pair, "position_id": pos["id"],
+                            "pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd,
+                        })
+
+            elif pos["side"] == "short":
+                # For shorts: price UP = loss, price DOWN = profit
+                pnl_pct = (entry_price - current_price) / entry_price
+                pnl_usd = (entry_price - current_price) * pos["quantity"]
+
+                if pnl_pct <= -stop_loss_pct:
+                    sl_order = await engine.close_position(pos["id"])
+                    sl_status = (sl_order.status.value if sl_order and hasattr(sl_order.status, "value") else "unknown") if sl_order else "failed"
+                    if sl_status == "rejected":
+                        logger.warning("SHORT STOP LOSS close REJECTED for %s: %s", pair, sl_order.error_message)
+                        self._log_activity(
+                            "error", pair,
+                            f"SHORT STOP LOSS close REJECTED {pair}: {sl_order.error_message or 'unknown'}",
+                            {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd, "error": sl_order.error_message},
+                        )
+                    else:
+                        logger.info("SHORT STOP LOSS triggered for %s (PnL: %.2f%%)", pair, pnl_pct * 100)
+                        self._log_activity(
+                            "sl", pair,
+                            f"SHORT STOP LOSS {pair} {pnl_pct * 100:+.1f}% (${pnl_usd:+.2f})",
+                            {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd},
+                        )
+                        self._publish(EventTypes.STOP_LOSS_HIT, {
+                            "pair": pair, "position_id": pos["id"],
+                            "pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd,
+                        })
+
+                elif pnl_pct >= take_profit_pct:
+                    tp_order = await engine.close_position(pos["id"])
+                    tp_status = (tp_order.status.value if tp_order and hasattr(tp_order.status, "value") else "unknown") if tp_order else "failed"
+                    if tp_status == "rejected":
+                        logger.warning("SHORT TAKE PROFIT close REJECTED for %s: %s", pair, tp_order.error_message)
+                        self._log_activity(
+                            "error", pair,
+                            f"SHORT TAKE PROFIT close REJECTED {pair}: {tp_order.error_message or 'unknown'}",
+                            {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd, "error": tp_order.error_message},
+                        )
+                    else:
+                        logger.info("SHORT TAKE PROFIT triggered for %s (PnL: %.2f%%)", pair, pnl_pct * 100)
+                        self._log_activity(
+                            "tp", pair,
+                            f"SHORT TAKE PROFIT {pair} {pnl_pct * 100:+.1f}% (${pnl_usd:+.2f})",
                             {"pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd},
                         )
                         self._publish(EventTypes.TAKE_PROFIT_HIT, {

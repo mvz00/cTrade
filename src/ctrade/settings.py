@@ -63,11 +63,15 @@ class StrategySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CTRADE_STRATEGY__")
 
     active_strategy: str = "combined"
-    technical_weight: float = 0.35
-    sentiment_weight: float = 0.15
-    onchain_weight: float = 0.10
-    derivatives_weight: float = 0.20
-    market_sentiment_weight: float = 0.20
+    technical_weight: float = 0.30
+    sentiment_weight: float = 0.10
+    onchain_weight: float = 0.08
+    derivatives_weight: float = 0.17
+    market_sentiment_weight: float = 0.17
+    cvd_weight: float = 0.10
+    social_velocity_weight: float = 0.08
+    strategy_mode: str = "long_only"
+    short_min_1h_change_pct: float = 2.0
     entry_confidence_threshold: float = 0.55
     exit_confidence_threshold: float = 0.45
     rsi_period: int = 14

@@ -59,6 +59,14 @@ class SignalAction(StrEnum):
     HOLD = "HOLD"
 
 
+class StrategyMode(StrEnum):
+    """Strategy position mode — controls which sides the orchestrator trades."""
+
+    LONG_ONLY = "long_only"
+    SHORT_ONLY = "short_only"
+    BOTH = "both"
+
+
 class Timeframe(StrEnum):
     """Candlestick timeframe intervals."""
 

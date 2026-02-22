@@ -160,15 +160,28 @@ class PaperEngine:
                     self._cash[quote] = available - cost - fee
                     self._cash[base] = self._cash.get(base, Decimal("0")) + order.quantity
                 else:  # sell
-                    available = self._cash.get(base, Decimal("0"))
-                    if available < order.quantity:
-                        order.status = OrderStatus.REJECTED
-                        order.error_message = f"Insufficient {base}: need {order.quantity}, have {available}"
-                        self._orders.append(order)
-                        return order
+                    existing_long = self._find_open_position(symbol, PositionSide.LONG)
+                    if existing_long:
+                        # Closing a long position — need the base asset
+                        available = self._cash.get(base, Decimal("0"))
+                        if available < order.quantity:
+                            order.status = OrderStatus.REJECTED
+                            order.error_message = f"Insufficient {base}: need {order.quantity}, have {available}"
+                            self._orders.append(order)
+                            return order
 
-                    self._cash[base] = available - order.quantity
-                    self._cash[quote] = self._cash.get(quote, Decimal("0")) + cost - fee
+                        self._cash[base] = available - order.quantity
+                        self._cash[quote] = self._cash.get(quote, Decimal("0")) + cost - fee
+                    else:
+                        # Opening a short position — use quote currency as margin
+                        available_quote = self._cash.get(quote, Decimal("0"))
+                        if available_quote < cost + fee:
+                            order.status = OrderStatus.REJECTED
+                            order.error_message = f"Insufficient {quote} margin: need {cost + fee}, have {available_quote}"
+                            self._orders.append(order)
+                            return order
+
+                        self._cash[quote] = available_quote - cost - fee
 
                 order.status = OrderStatus.FILLED
                 order.filled_quantity = order.quantity

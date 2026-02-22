@@ -72,6 +72,12 @@ export interface StrategyConfig {
   technical_weight: number;
   sentiment_weight: number;
   onchain_weight: number;
+  derivatives_weight: number;
+  market_sentiment_weight: number;
+  cvd_weight: number;
+  social_velocity_weight: number;
+  strategy_mode: string;
+  short_min_1h_change_pct: number;
   entry_confidence_threshold: number;
   exit_confidence_threshold: number;
 }
@@ -262,6 +268,12 @@ export interface StrategyConfigUpdate {
   technical_weight?: number;
   sentiment_weight?: number;
   onchain_weight?: number;
+  derivatives_weight?: number;
+  market_sentiment_weight?: number;
+  cvd_weight?: number;
+  social_velocity_weight?: number;
+  strategy_mode?: string;
+  short_min_1h_change_pct?: number;
   entry_confidence_threshold?: number;
   exit_confidence_threshold?: number;
 }

@@ -57,6 +57,8 @@ class Signal:
     onchain_score: float | None = None
     derivatives_score: float | None = None
     market_sentiment_score: float | None = None
+    cvd_score: float | None = None
+    social_velocity_score: float | None = None
     contributing_factors: dict[str, Any] = field(default_factory=dict)
     strategy_name: str = ""
     created_at: datetime = field(default_factory=_utc_now)
@@ -165,6 +167,8 @@ class MarketState:
     onchain_score: float | None = None
     derivatives_score: float | None = None
     market_sentiment_score: float | None = None
+    cvd_score: float | None = None
+    social_velocity_score: float | None = None
     timestamp: datetime = field(default_factory=_utc_now)
 
 

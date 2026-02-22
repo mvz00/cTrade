@@ -74,6 +74,10 @@ class RuntimeConfigStore:
             "onchain_weight": settings.strategy.onchain_weight,
             "derivatives_weight": settings.strategy.derivatives_weight,
             "market_sentiment_weight": settings.strategy.market_sentiment_weight,
+            "cvd_weight": settings.strategy.cvd_weight,
+            "social_velocity_weight": settings.strategy.social_velocity_weight,
+            "strategy_mode": settings.strategy.strategy_mode,
+            "short_min_1h_change_pct": settings.strategy.short_min_1h_change_pct,
             "entry_confidence_threshold": settings.strategy.entry_confidence_threshold,
             "exit_confidence_threshold": settings.strategy.exit_confidence_threshold,
         }
@@ -182,17 +186,20 @@ class RuntimeConfigStore:
                 _WEIGHT_KEYS = [
                     "technical_weight", "sentiment_weight", "onchain_weight",
                     "derivatives_weight", "market_sentiment_weight",
+                    "cvd_weight", "social_velocity_weight",
                 ]
                 missing_keys = [k for k in _WEIGHT_KEYS if k not in state["strategy"]]
                 if missing_keys:
                     # Old config is missing new weight(s).  Scale existing weights
                     # down proportionally to make room for the defaults.
                     _DEFAULT_WEIGHTS = {
-                        "technical_weight": 0.35,
-                        "sentiment_weight": 0.15,
-                        "onchain_weight": 0.10,
-                        "derivatives_weight": 0.20,
-                        "market_sentiment_weight": 0.20,
+                        "technical_weight": 0.30,
+                        "sentiment_weight": 0.10,
+                        "onchain_weight": 0.08,
+                        "derivatives_weight": 0.17,
+                        "market_sentiment_weight": 0.17,
+                        "cvd_weight": 0.10,
+                        "social_velocity_weight": 0.08,
                     }
                     # Sum of new default weights for the missing keys
                     new_weight_total = sum(_DEFAULT_WEIGHTS[k] for k in missing_keys)
@@ -276,6 +283,8 @@ class RuntimeConfigStore:
                 + merged.get("onchain_weight", 0)
                 + merged.get("derivatives_weight", 0)
                 + merged.get("market_sentiment_weight", 0)
+                + merged.get("cvd_weight", 0)
+                + merged.get("social_velocity_weight", 0)
             )
             if abs(weights - 1.0) > 0.001:
                 raise ValueError(

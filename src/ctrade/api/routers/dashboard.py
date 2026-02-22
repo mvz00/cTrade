@@ -73,16 +73,20 @@ async def get_system_status() -> dict[str, Any]:
         exchanges = store.list_exchanges()
 
         from ctrade.db.engine import ping_db
+        from ctrade.feeds.cvd import CVDFeed
         from ctrade.feeds.derivatives import DerivativesFeed
         from ctrade.feeds.market_sentiment import MarketSentimentFeed
         from ctrade.feeds.onchain import OnChainFeed
         from ctrade.feeds.sentiment import SentimentFeed
+        from ctrade.feeds.social_velocity import SocialVelocityFeed
 
         db_ok = await ping_db()
         sentiment = SentimentFeed.get_instance()
         onchain = OnChainFeed.get_instance()
         derivatives = DerivativesFeed.get_instance()
         mkt_sentiment = MarketSentimentFeed.get_instance()
+        cvd = CVDFeed.get_instance()
+        social_velocity = SocialVelocityFeed.get_instance()
 
         return {
             "api_server": {"status": "ok", "label": "Online"},
@@ -120,6 +124,22 @@ async def get_system_status() -> dict[str, Any]:
                     f"Active (F&G: {mkt_sentiment.get_fear_greed()['value']}, "
                     f"{mkt_sentiment.get_status()['long_short_symbols']} L/S symbols)"
                     if mkt_sentiment.is_enabled
+                    else "Inactive"
+                ),
+            },
+            "cvd_feed": {
+                "status": "ok" if cvd.is_enabled and await cvd.healthcheck() else "warning",
+                "label": (
+                    f"Active ({cvd.get_status()['symbols_tracked']} symbols)"
+                    if cvd.is_enabled
+                    else "Inactive"
+                ),
+            },
+            "social_velocity_feed": {
+                "status": "ok" if social_velocity.is_enabled and await social_velocity.healthcheck() else "warning",
+                "label": (
+                    f"Active ({social_velocity.get_status()['assets_tracked']} assets)"
+                    if social_velocity.is_enabled
                     else "Inactive"
                 ),
             },

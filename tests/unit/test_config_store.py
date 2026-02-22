@@ -33,24 +33,39 @@ class TestConfigStoreStrategy:
         store = RuntimeConfigStore.get()
         strategy = store.get_strategy()
         assert strategy["active_strategy"] == "combined"
-        assert strategy["technical_weight"] == 0.35
-        assert strategy["derivatives_weight"] == 0.20
-        assert strategy["market_sentiment_weight"] == 0.20
+        assert strategy["technical_weight"] == 0.30
+        assert strategy["derivatives_weight"] == 0.17
+        assert strategy["market_sentiment_weight"] == 0.17
+        assert strategy["cvd_weight"] == 0.10
+        assert strategy["social_velocity_weight"] == 0.08
+        assert strategy["strategy_mode"] == "long_only"
+        assert strategy["short_min_1h_change_pct"] == 2.0
+
+    def test_update_strategy_mode(self):
+        store = RuntimeConfigStore.get()
+        updated = store.update_strategy({"strategy_mode": "short_only"})
+        assert updated["strategy_mode"] == "short_only"
+        # Weights unchanged
+        assert updated["technical_weight"] == 0.30
 
     def test_update_strategy_valid_weights(self):
         store = RuntimeConfigStore.get()
         updated = store.update_strategy({
-            "technical_weight": 0.40,
-            "sentiment_weight": 0.15,
-            "onchain_weight": 0.10,
-            "derivatives_weight": 0.20,
-            "market_sentiment_weight": 0.15,
+            "technical_weight": 0.30,
+            "sentiment_weight": 0.10,
+            "onchain_weight": 0.08,
+            "derivatives_weight": 0.17,
+            "market_sentiment_weight": 0.17,
+            "cvd_weight": 0.10,
+            "social_velocity_weight": 0.08,
         })
-        assert updated["technical_weight"] == 0.40
-        assert updated["sentiment_weight"] == 0.15
-        assert updated["onchain_weight"] == 0.10
-        assert updated["derivatives_weight"] == 0.20
-        assert updated["market_sentiment_weight"] == 0.15
+        assert updated["technical_weight"] == 0.30
+        assert updated["sentiment_weight"] == 0.10
+        assert updated["onchain_weight"] == 0.08
+        assert updated["derivatives_weight"] == 0.17
+        assert updated["market_sentiment_weight"] == 0.17
+        assert updated["cvd_weight"] == 0.10
+        assert updated["social_velocity_weight"] == 0.08
 
     def test_update_strategy_invalid_weights_rejected(self):
         store = RuntimeConfigStore.get()
@@ -65,7 +80,7 @@ class TestConfigStoreStrategy:
         updated = store.update_strategy({"entry_confidence_threshold": 0.80})
         assert updated["entry_confidence_threshold"] == 0.80
         # Weights unchanged
-        assert updated["technical_weight"] == 0.35
+        assert updated["technical_weight"] == 0.30
 
 
 class TestConfigStoreRisk:

@@ -30,6 +30,10 @@ class StrategyConfigUpdate(BaseModel):
     onchain_weight: float | None = Field(None, ge=0, le=1)
     derivatives_weight: float | None = Field(None, ge=0, le=1)
     market_sentiment_weight: float | None = Field(None, ge=0, le=1)
+    cvd_weight: float | None = Field(None, ge=0, le=1)
+    social_velocity_weight: float | None = Field(None, ge=0, le=1)
+    strategy_mode: str | None = Field(None, pattern=r"^(long_only|short_only|both)$")
+    short_min_1h_change_pct: float | None = Field(None, ge=0.5, le=20.0)
     entry_confidence_threshold: float | None = Field(None, ge=0, le=1)
     exit_confidence_threshold: float | None = Field(None, ge=0, le=1)
 
@@ -39,8 +43,12 @@ class StrategyConfigResponse(BaseModel):
     technical_weight: float
     sentiment_weight: float
     onchain_weight: float
-    derivatives_weight: float = 0.20
-    market_sentiment_weight: float = 0.20
+    derivatives_weight: float = 0.17
+    market_sentiment_weight: float = 0.17
+    cvd_weight: float = 0.10
+    social_velocity_weight: float = 0.08
+    strategy_mode: str = "long_only"
+    short_min_1h_change_pct: float = 2.0
     entry_confidence_threshold: float
     exit_confidence_threshold: float
 

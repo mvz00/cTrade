@@ -103,10 +103,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start data feeds (each is no-op if preconditions not met)
     from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+    from ctrade.feeds.cvd import CVDFeed
     from ctrade.feeds.derivatives import DerivativesFeed
     from ctrade.feeds.market_sentiment import MarketSentimentFeed
     from ctrade.feeds.onchain import OnChainFeed
     from ctrade.feeds.sentiment import SentimentFeed
+    from ctrade.feeds.social_velocity import SocialVelocityFeed
 
     cmc_feed = CoinMarketCapFeed.get_instance()
     await cmc_feed.start()
@@ -122,6 +124,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     mkt_sentiment_feed = MarketSentimentFeed.get_instance()
     await mkt_sentiment_feed.start()
+
+    cvd_feed = CVDFeed.get_instance()
+    await cvd_feed.start()
+
+    social_velocity_feed = SocialVelocityFeed.get_instance()
+    await social_velocity_feed.start()
 
     # Register notification channels (optional — only when env vars are set)
     from ctrade.notifications.channels.router import NotificationRouter
@@ -152,6 +160,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Shutdown ---
     logger.info("Shutting down cTrade...")
 
+    await social_velocity_feed.stop()
+    await cvd_feed.stop()
     await mkt_sentiment_feed.stop()
     await derivatives_feed.stop()
     await onchain_feed.stop()

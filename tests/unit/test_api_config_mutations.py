@@ -80,20 +80,24 @@ async def test_put_strategy_config(test_app):
         response = await client.put(
             "/api/v1/config/strategy",
             json={
-                "technical_weight": 0.40,
-                "sentiment_weight": 0.15,
-                "onchain_weight": 0.10,
-                "derivatives_weight": 0.20,
-                "market_sentiment_weight": 0.15,
+                "technical_weight": 0.30,
+                "sentiment_weight": 0.10,
+                "onchain_weight": 0.08,
+                "derivatives_weight": 0.17,
+                "market_sentiment_weight": 0.17,
+                "cvd_weight": 0.10,
+                "social_velocity_weight": 0.08,
             },
         )
     assert response.status_code == 200
     data = response.json()
-    assert data["technical_weight"] == 0.40
-    assert data["sentiment_weight"] == 0.15
-    assert data["onchain_weight"] == 0.10
-    assert data["derivatives_weight"] == 0.20
-    assert data["market_sentiment_weight"] == 0.15
+    assert data["technical_weight"] == 0.30
+    assert data["sentiment_weight"] == 0.10
+    assert data["onchain_weight"] == 0.08
+    assert data["derivatives_weight"] == 0.17
+    assert data["market_sentiment_weight"] == 0.17
+    assert data["cvd_weight"] == 0.10
+    assert data["social_velocity_weight"] == 0.08
 
 
 @pytest.mark.asyncio
@@ -144,5 +148,30 @@ async def test_put_risk_out_of_range(test_app):
         response = await client.put(
             "/api/v1/config/risk",
             json={"max_position_pct": 2.0},
+        )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_put_strategy_mode(test_app):
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/v1/config/strategy",
+            json={"strategy_mode": "short_only", "short_min_1h_change_pct": 3.0},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["strategy_mode"] == "short_only"
+    assert data["short_min_1h_change_pct"] == 3.0
+
+
+@pytest.mark.asyncio
+async def test_put_strategy_mode_invalid(test_app):
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.put(
+            "/api/v1/config/strategy",
+            json={"strategy_mode": "invalid_mode"},
         )
     assert response.status_code == 422
