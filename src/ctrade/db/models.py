@@ -112,6 +112,7 @@ class SignalModel(Base):
     technical_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     sentiment_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     onchain_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    derivatives_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     contributing_factors: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 

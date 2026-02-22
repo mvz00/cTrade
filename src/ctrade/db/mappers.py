@@ -299,6 +299,7 @@ async def signal_to_orm(signal: Signal, resolver: PairResolver) -> SignalModel:
         technical_score=signal.technical_score,
         sentiment_score=signal.sentiment_score,
         onchain_score=signal.onchain_score,
+        derivatives_score=signal.derivatives_score,
         contributing_factors=signal.contributing_factors or {},
         created_at=signal.created_at,
     )
@@ -314,6 +315,7 @@ def orm_to_signal(orm: SignalModel, resolver: PairResolver) -> Signal:
         technical_score=float(orm.technical_score) if orm.technical_score is not None else None,
         sentiment_score=float(orm.sentiment_score) if orm.sentiment_score is not None else None,
         onchain_score=float(orm.onchain_score) if orm.onchain_score is not None else None,
+        derivatives_score=float(orm.derivatives_score) if hasattr(orm, "derivatives_score") and orm.derivatives_score is not None else None,
         contributing_factors=orm.contributing_factors or {},
         strategy_name=orm.strategy_name or "",
         created_at=orm.created_at,

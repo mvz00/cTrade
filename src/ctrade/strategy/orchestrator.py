@@ -23,6 +23,7 @@ from ctrade.exchange.engine_resolver import get_engine
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+from ctrade.feeds.derivatives import DerivativesFeed
 from ctrade.feeds.onchain import OnChainFeed
 from ctrade.feeds.sentiment import SentimentFeed
 from ctrade.strategy.signal_manager import SignalManager
@@ -348,12 +349,13 @@ class TradingOrchestrator:
         take_profit_pct: float,
         strategy: dict[str, Any],
     ) -> None:
-        """Analyze a single pair using 3-way signal fusion and potentially trade.
+        """Analyze a single pair using 4-way signal fusion and potentially trade.
 
-        Blends up to three intelligence sources with configurable weights:
-        * Technical analysis (indicators + CMC momentum) — default 0.50
-        * Sentiment (FinBERT-classified news/social)   — default 0.30
-        * On-chain metrics (hash rate, volume, etc.)    — default 0.20
+        Blends up to four intelligence sources with configurable weights:
+        * Technical analysis (indicators + CMC momentum) — default 0.40
+        * Sentiment (FinBERT-classified news/social)   — default 0.20
+        * On-chain metrics (hash rate, volume, etc.)    — default 0.15
+        * Derivatives (funding rate, OI, order book)    — default 0.25
 
         If a source is unavailable (returns None), its weight is redistributed
         proportionally to the available sources.
@@ -395,12 +397,17 @@ class TradingOrchestrator:
         onchain_feed = OnChainFeed.get_instance()
         onchain_score = onchain_feed.get_onchain_score(pair)
 
+        # 4. Derivatives score (may be None if feed not ready or exchange unavailable)
+        derivatives_feed = DerivativesFeed.get_instance()
+        derivatives_score = derivatives_feed.get_derivatives_score(pair)
+
         # ---- Weighted fusion with proportional redistribution ----
 
         raw_weights = {
-            "technical": strategy.get("technical_weight", 0.50),
-            "sentiment": strategy.get("sentiment_weight", 0.30),
-            "onchain": strategy.get("onchain_weight", 0.20),
+            "technical": strategy.get("technical_weight", 0.40),
+            "sentiment": strategy.get("sentiment_weight", 0.20),
+            "onchain": strategy.get("onchain_weight", 0.15),
+            "derivatives": strategy.get("derivatives_weight", 0.25),
         }
 
         scores: dict[str, float] = {"technical": tech_score}
@@ -408,6 +415,8 @@ class TradingOrchestrator:
             scores["sentiment"] = sentiment_score
         if onchain_score is not None:
             scores["onchain"] = onchain_score
+        if derivatives_score is not None:
+            scores["derivatives"] = derivatives_score
 
         # Redistribute unavailable weights proportionally
         available_weight = sum(raw_weights[k] for k in scores)
@@ -476,6 +485,9 @@ class TradingOrchestrator:
         if onchain_score is not None:
             contributing_factors["onchain"] = onchain_feed.get_contributing_factors(pair)
 
+        if derivatives_score is not None:
+            contributing_factors["derivatives"] = derivatives_feed.get_contributing_factors(pair)
+
         contributing_factors["fusion"] = {
             "composite": composite,
             "weights": {k: round(v, 4) for k, v in weights.items()},
@@ -500,6 +512,7 @@ class TradingOrchestrator:
             technical_score=tech_score,
             sentiment_score=sentiment_score,
             onchain_score=onchain_score,
+            derivatives_score=derivatives_score,
             strategy_name=strategy_name,
             contributing_factors=contributing_factors,
         )

@@ -123,6 +123,7 @@ class SignalManager:
             "technical_score": s.technical_score,
             "sentiment_score": s.sentiment_score,
             "onchain_score": s.onchain_score,
+            "derivatives_score": s.derivatives_score,
             "strategy_name": s.strategy_name,
             "contributing_factors": s.contributing_factors,
             "created_at": s.created_at.isoformat(),

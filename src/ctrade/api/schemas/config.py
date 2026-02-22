@@ -28,6 +28,7 @@ class StrategyConfigUpdate(BaseModel):
     technical_weight: float | None = Field(None, ge=0, le=1)
     sentiment_weight: float | None = Field(None, ge=0, le=1)
     onchain_weight: float | None = Field(None, ge=0, le=1)
+    derivatives_weight: float | None = Field(None, ge=0, le=1)
     entry_confidence_threshold: float | None = Field(None, ge=0, le=1)
     exit_confidence_threshold: float | None = Field(None, ge=0, le=1)
 
@@ -37,6 +38,7 @@ class StrategyConfigResponse(BaseModel):
     technical_weight: float
     sentiment_weight: float
     onchain_weight: float
+    derivatives_weight: float = 0.25
     entry_confidence_threshold: float
     exit_confidence_threshold: float
 
