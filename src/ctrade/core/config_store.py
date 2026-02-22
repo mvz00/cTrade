@@ -73,6 +73,7 @@ class RuntimeConfigStore:
             "sentiment_weight": settings.strategy.sentiment_weight,
             "onchain_weight": settings.strategy.onchain_weight,
             "derivatives_weight": settings.strategy.derivatives_weight,
+            "market_sentiment_weight": settings.strategy.market_sentiment_weight,
             "entry_confidence_threshold": settings.strategy.entry_confidence_threshold,
             "exit_confidence_threshold": settings.strategy.exit_confidence_threshold,
         }
@@ -177,32 +178,38 @@ class RuntimeConfigStore:
             if "strategy" in state and isinstance(state["strategy"], dict):
                 self._strategy.update(state["strategy"])
 
-                # Migration: ensure derivatives_weight exists and weights sum to 1.0
-                if "derivatives_weight" not in state["strategy"]:
-                    # Old config had 3 weights.  Scale them down to make room
-                    # for derivatives_weight (default 0.25).
-                    old_total = (
-                        self._strategy.get("technical_weight", 0)
-                        + self._strategy.get("sentiment_weight", 0)
-                        + self._strategy.get("onchain_weight", 0)
-                    )
-                    derivatives_w = 0.25
-                    remaining = 1.0 - derivatives_w
-                    if old_total > 0:
+                # Migration: ensure all weight keys exist and weights sum to 1.0
+                _WEIGHT_KEYS = [
+                    "technical_weight", "sentiment_weight", "onchain_weight",
+                    "derivatives_weight", "market_sentiment_weight",
+                ]
+                missing_keys = [k for k in _WEIGHT_KEYS if k not in state["strategy"]]
+                if missing_keys:
+                    # Old config is missing new weight(s).  Scale existing weights
+                    # down proportionally to make room for the defaults.
+                    _DEFAULT_WEIGHTS = {
+                        "technical_weight": 0.35,
+                        "sentiment_weight": 0.15,
+                        "onchain_weight": 0.10,
+                        "derivatives_weight": 0.20,
+                        "market_sentiment_weight": 0.20,
+                    }
+                    # Sum of new default weights for the missing keys
+                    new_weight_total = sum(_DEFAULT_WEIGHTS[k] for k in missing_keys)
+                    remaining = 1.0 - new_weight_total
+                    # Sum of existing weights
+                    existing_keys = [k for k in _WEIGHT_KEYS if k not in missing_keys]
+                    old_total = sum(self._strategy.get(k, 0) for k in existing_keys)
+                    if old_total > 0 and remaining > 0:
                         scale = remaining / old_total
-                        self._strategy["technical_weight"] = round(
-                            self._strategy["technical_weight"] * scale, 4
-                        )
-                        self._strategy["sentiment_weight"] = round(
-                            self._strategy["sentiment_weight"] * scale, 4
-                        )
-                        self._strategy["onchain_weight"] = round(
-                            self._strategy["onchain_weight"] * scale, 4
-                        )
-                    self._strategy["derivatives_weight"] = derivatives_w
+                        for k in existing_keys:
+                            self._strategy[k] = round(self._strategy.get(k, 0) * scale, 4)
+                    # Insert new weights with defaults
+                    for k in missing_keys:
+                        self._strategy[k] = _DEFAULT_WEIGHTS[k]
                     logger.info(
-                        "Migrated strategy weights to include derivatives_weight=%.2f",
-                        derivatives_w,
+                        "Migrated strategy weights: added %s",
+                        ", ".join(f"{k}={_DEFAULT_WEIGHTS[k]}" for k in missing_keys),
                     )
 
             if "risk" in state and isinstance(state["risk"], dict):
@@ -268,6 +275,7 @@ class RuntimeConfigStore:
                 + merged.get("sentiment_weight", 0)
                 + merged.get("onchain_weight", 0)
                 + merged.get("derivatives_weight", 0)
+                + merged.get("market_sentiment_weight", 0)
             )
             if abs(weights - 1.0) > 0.001:
                 raise ValueError(

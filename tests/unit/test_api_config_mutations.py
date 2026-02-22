@@ -80,18 +80,20 @@ async def test_put_strategy_config(test_app):
         response = await client.put(
             "/api/v1/config/strategy",
             json={
-                "technical_weight": 0.50,
-                "sentiment_weight": 0.20,
+                "technical_weight": 0.40,
+                "sentiment_weight": 0.15,
                 "onchain_weight": 0.10,
                 "derivatives_weight": 0.20,
+                "market_sentiment_weight": 0.15,
             },
         )
     assert response.status_code == 200
     data = response.json()
-    assert data["technical_weight"] == 0.50
-    assert data["sentiment_weight"] == 0.20
+    assert data["technical_weight"] == 0.40
+    assert data["sentiment_weight"] == 0.15
     assert data["onchain_weight"] == 0.10
     assert data["derivatives_weight"] == 0.20
+    assert data["market_sentiment_weight"] == 0.15
 
 
 @pytest.mark.asyncio

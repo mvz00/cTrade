@@ -33,28 +33,31 @@ class TestConfigStoreStrategy:
         store = RuntimeConfigStore.get()
         strategy = store.get_strategy()
         assert strategy["active_strategy"] == "combined"
-        assert strategy["technical_weight"] == 0.40
-        assert strategy["derivatives_weight"] == 0.25
+        assert strategy["technical_weight"] == 0.35
+        assert strategy["derivatives_weight"] == 0.20
+        assert strategy["market_sentiment_weight"] == 0.20
 
     def test_update_strategy_valid_weights(self):
         store = RuntimeConfigStore.get()
         updated = store.update_strategy({
-            "technical_weight": 0.50,
-            "sentiment_weight": 0.20,
+            "technical_weight": 0.40,
+            "sentiment_weight": 0.15,
             "onchain_weight": 0.10,
             "derivatives_weight": 0.20,
+            "market_sentiment_weight": 0.15,
         })
-        assert updated["technical_weight"] == 0.50
-        assert updated["sentiment_weight"] == 0.20
+        assert updated["technical_weight"] == 0.40
+        assert updated["sentiment_weight"] == 0.15
         assert updated["onchain_weight"] == 0.10
         assert updated["derivatives_weight"] == 0.20
+        assert updated["market_sentiment_weight"] == 0.15
 
     def test_update_strategy_invalid_weights_rejected(self):
         store = RuntimeConfigStore.get()
         with pytest.raises(ValueError, match="must sum to 1.0"):
             store.update_strategy({
                 "technical_weight": 0.90,
-                # sentiment=0.20, onchain=0.15, derivatives=0.25 → sum=1.50
+                # other weights unchanged → sum > 1.0
             })
 
     def test_update_strategy_threshold_only(self):
@@ -62,7 +65,7 @@ class TestConfigStoreStrategy:
         updated = store.update_strategy({"entry_confidence_threshold": 0.80})
         assert updated["entry_confidence_threshold"] == 0.80
         # Weights unchanged
-        assert updated["technical_weight"] == 0.40
+        assert updated["technical_weight"] == 0.35
 
 
 class TestConfigStoreRisk:

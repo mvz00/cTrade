@@ -124,6 +124,7 @@ class SignalManager:
             "sentiment_score": s.sentiment_score,
             "onchain_score": s.onchain_score,
             "derivatives_score": s.derivatives_score,
+            "market_sentiment_score": s.market_sentiment_score,
             "strategy_name": s.strategy_name,
             "contributing_factors": s.contributing_factors,
             "created_at": s.created_at.isoformat(),

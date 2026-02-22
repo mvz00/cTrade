@@ -74,6 +74,7 @@ async def get_system_status() -> dict[str, Any]:
 
         from ctrade.db.engine import ping_db
         from ctrade.feeds.derivatives import DerivativesFeed
+        from ctrade.feeds.market_sentiment import MarketSentimentFeed
         from ctrade.feeds.onchain import OnChainFeed
         from ctrade.feeds.sentiment import SentimentFeed
 
@@ -81,6 +82,7 @@ async def get_system_status() -> dict[str, Any]:
         sentiment = SentimentFeed.get_instance()
         onchain = OnChainFeed.get_instance()
         derivatives = DerivativesFeed.get_instance()
+        mkt_sentiment = MarketSentimentFeed.get_instance()
 
         return {
             "api_server": {"status": "ok", "label": "Online"},
@@ -110,6 +112,15 @@ async def get_system_status() -> dict[str, Any]:
                     f"Active ({derivatives.get_status()['symbols_tracked']} symbols)"
                     if derivatives.is_enabled
                     else "Inactive (no exchange)"
+                ),
+            },
+            "market_sentiment_feed": {
+                "status": "ok" if mkt_sentiment.is_enabled and await mkt_sentiment.healthcheck() else "warning",
+                "label": (
+                    f"Active (F&G: {mkt_sentiment.get_fear_greed()['value']}, "
+                    f"{mkt_sentiment.get_status()['long_short_symbols']} L/S symbols)"
+                    if mkt_sentiment.is_enabled
+                    else "Inactive"
                 ),
             },
             "event_bus": {"status": "ok", "label": "Running"},

@@ -16,6 +16,7 @@ class SignalResponse(BaseModel):
     sentiment_score: float | None = None
     onchain_score: float | None = None
     derivatives_score: float | None = None
+    market_sentiment_score: float | None = None
     strategy_name: str
     contributing_factors: dict[str, Any] = {}
     created_at: str

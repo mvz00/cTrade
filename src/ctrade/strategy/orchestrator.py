@@ -24,6 +24,7 @@ from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
 from ctrade.feeds.derivatives import DerivativesFeed
+from ctrade.feeds.market_sentiment import MarketSentimentFeed
 from ctrade.feeds.onchain import OnChainFeed
 from ctrade.feeds.sentiment import SentimentFeed
 from ctrade.strategy.signal_manager import SignalManager
@@ -349,13 +350,14 @@ class TradingOrchestrator:
         take_profit_pct: float,
         strategy: dict[str, Any],
     ) -> None:
-        """Analyze a single pair using 4-way signal fusion and potentially trade.
+        """Analyze a single pair using 5-way signal fusion and potentially trade.
 
-        Blends up to four intelligence sources with configurable weights:
-        * Technical analysis (indicators + CMC momentum) — default 0.40
-        * Sentiment (FinBERT-classified news/social)   — default 0.20
-        * On-chain metrics (hash rate, volume, etc.)    — default 0.15
-        * Derivatives (funding rate, OI, order book)    — default 0.25
+        Blends up to five intelligence sources with configurable weights:
+        * Technical analysis (indicators + CMC momentum) — default 0.35
+        * Sentiment (FinBERT-classified news/social)   — default 0.15
+        * On-chain metrics (hash rate, volume, etc.)    — default 0.10
+        * Derivatives (funding rate, OI, order book)    — default 0.20
+        * Market sentiment (F&G, L/S ratio, liq data)   — default 0.20
 
         If a source is unavailable (returns None), its weight is redistributed
         proportionally to the available sources.
@@ -401,13 +403,18 @@ class TradingOrchestrator:
         derivatives_feed = DerivativesFeed.get_instance()
         derivatives_score = derivatives_feed.get_derivatives_score(pair)
 
+        # 5. Market sentiment score (F&G index, L/S ratio, liquidation data)
+        mkt_sentiment_feed = MarketSentimentFeed.get_instance()
+        market_sentiment_score = mkt_sentiment_feed.get_market_sentiment_score(pair)
+
         # ---- Weighted fusion with proportional redistribution ----
 
         raw_weights = {
-            "technical": strategy.get("technical_weight", 0.40),
-            "sentiment": strategy.get("sentiment_weight", 0.20),
-            "onchain": strategy.get("onchain_weight", 0.15),
-            "derivatives": strategy.get("derivatives_weight", 0.25),
+            "technical": strategy.get("technical_weight", 0.35),
+            "sentiment": strategy.get("sentiment_weight", 0.15),
+            "onchain": strategy.get("onchain_weight", 0.10),
+            "derivatives": strategy.get("derivatives_weight", 0.20),
+            "market_sentiment": strategy.get("market_sentiment_weight", 0.20),
         }
 
         scores: dict[str, float] = {"technical": tech_score}
@@ -417,6 +424,8 @@ class TradingOrchestrator:
             scores["onchain"] = onchain_score
         if derivatives_score is not None:
             scores["derivatives"] = derivatives_score
+        if market_sentiment_score is not None:
+            scores["market_sentiment"] = market_sentiment_score
 
         # Redistribute unavailable weights proportionally
         available_weight = sum(raw_weights[k] for k in scores)
@@ -488,6 +497,9 @@ class TradingOrchestrator:
         if derivatives_score is not None:
             contributing_factors["derivatives"] = derivatives_feed.get_contributing_factors(pair)
 
+        if market_sentiment_score is not None:
+            contributing_factors["market_sentiment"] = mkt_sentiment_feed.get_contributing_factors(pair)
+
         contributing_factors["fusion"] = {
             "composite": composite,
             "weights": {k: round(v, 4) for k, v in weights.items()},
@@ -513,6 +525,7 @@ class TradingOrchestrator:
             sentiment_score=sentiment_score,
             onchain_score=onchain_score,
             derivatives_score=derivatives_score,
+            market_sentiment_score=market_sentiment_score,
             strategy_name=strategy_name,
             contributing_factors=contributing_factors,
         )

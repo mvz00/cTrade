@@ -9,8 +9,9 @@ def test_default_settings():
     assert settings.app_name == "cTrade"
     assert settings.trading.mode == "paper"
     assert settings.risk.max_position_pct == 0.10
-    assert settings.strategy.technical_weight == 0.40
-    assert settings.strategy.derivatives_weight == 0.25
+    assert settings.strategy.technical_weight == 0.35
+    assert settings.strategy.derivatives_weight == 0.20
+    assert settings.strategy.market_sentiment_weight == 0.20
     assert settings.api_port == 8000
 
 
@@ -22,6 +23,7 @@ def test_strategy_weights_sum():
         + settings.strategy.sentiment_weight
         + settings.strategy.onchain_weight
         + settings.strategy.derivatives_weight
+        + settings.strategy.market_sentiment_weight
     )
     assert abs(total - 1.0) < 0.01
 
