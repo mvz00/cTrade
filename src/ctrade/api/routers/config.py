@@ -31,8 +31,49 @@ async def get_trading_mode() -> TradingModeResponse:
 
 @router.put("/trading-mode", response_model=TradingModeResponse)
 async def update_trading_mode(body: TradingModeUpdate) -> TradingModeResponse:
-    """Update trading mode."""
-    updated = _store().update_trading(body.model_dump(exclude_none=True))
+    """Update trading mode.
+
+    Switching to live mode requires at least one configured exchange
+    and a valid encryption key.
+    """
+    updates = body.model_dump(exclude_none=True)
+
+    # Validate prerequisites when switching to live mode
+    if updates.get("mode") == "live":
+        store = _store()
+        exchanges = store.list_exchanges()
+        if not exchanges:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Cannot switch to live mode: no exchange configured. "
+                    "Add an exchange first via Settings > Exchanges."
+                ),
+            )
+
+        # Verify encryption key is available (needed to decrypt API credentials)
+        try:
+            from ctrade.settings import get_settings
+
+            settings = get_settings()
+            key = settings.encryption_key.get_secret_value()
+            if not key:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Cannot switch to live mode: no encryption key configured. "
+                        "Set CTRADE_ENCRYPTION_KEY env var."
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=422,
+                detail="Cannot switch to live mode: failed to verify encryption key.",
+            )
+
+    updated = _store().update_trading(updates)
     return TradingModeResponse(**updated)
 
 

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, ClassVar, Coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,28 @@ class EventBus:
 
     Supports publish/subscribe pattern with multiple handlers per event type.
     Handlers are called concurrently for each event.
+
+    Use ``get_instance()`` / ``reset()`` for singleton access (same pattern as
+    every other manager in the codebase).
     """
+
+    _instance: ClassVar[EventBus | None] = None
+    _singleton_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    @classmethod
+    def get_instance(cls) -> EventBus:
+        """Return the singleton EventBus, creating it on first call."""
+        if cls._instance is None:
+            with cls._singleton_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the singleton (mainly for tests)."""
+        with cls._singleton_lock:
+            cls._instance = None
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[EventHandler]] = defaultdict(list)
@@ -145,6 +167,9 @@ class EventTypes:
 
     # On-chain
     ONCHAIN_UPDATE = "onchain.update"
+
+    # Alerts
+    ALERT_TRIGGERED = "alert.triggered"
 
     # System
     SYSTEM_STARTUP = "system.startup"

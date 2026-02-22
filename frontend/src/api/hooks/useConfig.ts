@@ -32,7 +32,11 @@ export function useUpdateTradingMode() {
   return useMutation({
     mutationFn: (body: TradingModeUpdate) => api.updateTradingMode(body),
     onSuccess: () => {
+      // Invalidate everything that depends on trading mode
       qc.invalidateQueries({ queryKey: ['config', 'trading-mode'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['trading'] });
+      qc.invalidateQueries({ queryKey: ['signals'] });
     },
   });
 }

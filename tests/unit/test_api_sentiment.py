@@ -40,8 +40,13 @@ def _seed_feed(asset: str = "BTC", n: int = 5) -> SentimentFeed:
 
 
 @pytest.fixture
-def app():
-    return create_app()
+def app(monkeypatch):
+    from ctrade.settings import get_settings
+    get_settings.cache_clear()
+    monkeypatch.setenv("CTRADE_AUTH__ENABLED", "false")
+    _app = create_app()
+    yield _app
+    get_settings.cache_clear()
 
 
 @pytest.fixture

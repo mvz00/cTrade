@@ -2,6 +2,7 @@ import { useHealth } from '@/api/hooks/useHealth';
 import { useTradingMode } from '@/api/hooks/useConfig';
 import { Badge } from '@/components/ui/Badge';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { UserDropdown } from './UserDropdown';
 
 export function TopBar() {
   const health = useHealth();
@@ -22,6 +23,7 @@ export function TopBar() {
           status={health.isLoading ? 'loading' : isOnline ? 'ok' : 'error'}
           label={health.isLoading ? 'Connecting...' : isOnline ? 'Online' : 'Offline'}
         />
+        <UserDropdown />
       </div>
     </header>
   );

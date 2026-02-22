@@ -1,4 +1,5 @@
 export const ROUTES = {
+  LOGIN: '/login',
   DASHBOARD: '/dashboard',
   TRADING: '/trading',
   CONFIGURATION: '/configuration',
@@ -7,6 +8,7 @@ export const ROUTES = {
   SCREENER: '/screener',
   BACKTESTING: '/backtesting',
   ALERTS: '/alerts',
+  ACCOUNT: '/account',
 } as const;
 
 export const REFETCH_INTERVALS = {

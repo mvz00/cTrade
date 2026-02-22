@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -21,7 +22,7 @@ from ctrade.api.schemas.trading import (
     PositionResponse,
     TickerResponse,
 )
-from ctrade.core.config_store import RuntimeConfigStore
+from ctrade.exchange.engine_resolver import get_engine
 from ctrade.exchange.market_data import MarketDataProvider
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.strategy.orchestrator import TradingOrchestrator
@@ -29,7 +30,7 @@ from ctrade.strategy.orchestrator import TradingOrchestrator
 router = APIRouter(prefix="/trading", tags=["trading"])
 
 
-# ---- Watched Pairs ----
+# ---- Watched Pairs (shared — always use PaperEngine) ----
 
 @router.get("/pairs", response_model=list[PairResponse])
 async def list_pairs() -> list[PairResponse]:
@@ -82,7 +83,7 @@ async def list_orders(
     status: str | None = Query(None, description="Filter by status"),
 ) -> list[OrderResponse]:
     """List all orders."""
-    engine = PaperEngine.get_instance()
+    engine = get_engine()
     orders = engine.get_orders(status=status)
     return [OrderResponse(**o) for o in orders]
 
@@ -90,15 +91,15 @@ async def list_orders(
 @router.post("/orders", response_model=OrderResponse, status_code=201)
 async def place_order(body: PlaceOrderRequest) -> OrderResponse:
     """Place a manual order."""
-    engine = PaperEngine.get_instance()
-    order = engine.place_order(
+    engine = get_engine()
+    order = await engine.place_order(
         symbol=body.symbol,
         side=body.side,
         order_type=body.order_type,
         quantity=body.quantity,
         price=body.price,
     )
-    return OrderResponse(**PaperEngine._order_to_dict(order))
+    return OrderResponse(**engine._order_to_dict(order))
 
 
 # ---- Positions ----
@@ -108,38 +109,67 @@ async def list_positions(
     status: str | None = Query(None, description="Filter: open, closed"),
 ) -> list[PositionResponse]:
     """List positions."""
-    engine = PaperEngine.get_instance()
+    engine = get_engine()
     positions = engine.get_positions(status=status)
     return [PositionResponse(**p) for p in positions]
+
+
+@router.post("/positions/close-all")
+async def close_all_positions() -> dict[str, Any]:
+    """Close all open positions at market price."""
+    engine = get_engine()
+    open_positions = engine.get_positions(status="open")
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for pos in open_positions:
+        try:
+            order = await engine.close_position(pos["id"])
+            if order and order.status == "filled":
+                results.append({
+                    "position_id": pos["id"],
+                    "pair": pos["pair_symbol"],
+                    "status": "closed",
+                })
+            elif order and order.status == "rejected":
+                errors.append(f"{pos['pair_symbol']}: {order.error_message}")
+            else:
+                errors.append(f"{pos['pair_symbol']}: position not found")
+        except Exception as e:
+            errors.append(f"{pos['pair_symbol']}: {e}")
+
+    return {
+        "closed": len(results),
+        "failed": len(errors),
+        "errors": errors,
+        "results": results,
+    }
 
 
 @router.post("/positions/{position_id}/close", response_model=OrderResponse)
 async def close_position(position_id: str) -> OrderResponse:
     """Close an open position at market price."""
-    engine = PaperEngine.get_instance()
-    order = engine.close_position(position_id)
+    engine = get_engine()
+    order = await engine.close_position(position_id)
     if not order:
         raise HTTPException(status_code=404, detail="Position not found or already closed")
-    return OrderResponse(**PaperEngine._order_to_dict(order))
+    order_dict = engine._order_to_dict(order)
+    if order.status == "rejected":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Close order rejected: {order.error_message or 'unknown error'}",
+        )
+    return OrderResponse(**order_dict)
 
 
 # ---- Portfolio ----
 
 @router.get("/portfolio", response_model=PortfolioResponse)
 async def get_portfolio() -> PortfolioResponse:
-    """Get portfolio summary.  In live mode, fetches real exchange balances."""
-    store = RuntimeConfigStore.get()
-    mode = store.get_trading()["mode"]
-
-    if mode == "live":
-        market = MarketDataProvider.get_instance()
-        live_portfolio = await market.fetch_exchange_portfolio()
-        if live_portfolio:
-            return PortfolioResponse(**live_portfolio)
-        # Fall through to paper if live fetch fails (no exchange configured)
-
-    engine = PaperEngine.get_instance()
-    return PortfolioResponse(**engine.get_portfolio())
+    """Get portfolio summary. Engine resolver handles paper vs live routing."""
+    engine = get_engine()
+    portfolio = await engine.get_portfolio()
+    return PortfolioResponse(**portfolio)
 
 
 # ---- Trade History CSV Export ----
@@ -147,7 +177,7 @@ async def get_portfolio() -> PortfolioResponse:
 @router.get("/history/export")
 async def export_trade_history() -> StreamingResponse:
     """Export closed positions as a CSV file."""
-    engine = PaperEngine.get_instance()
+    engine = get_engine()
     positions = engine.get_positions(status="closed")
 
     buf = io.StringIO()

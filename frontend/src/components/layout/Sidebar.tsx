@@ -8,6 +8,7 @@ import {
   Flame,
   FlaskConical,
   Bell,
+  UserCog,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -51,11 +52,31 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-3 px-2 space-y-1">
-        {navItems.map(({ to, icon: Icon, label }) => (
+      <nav className="flex-1 py-3 px-2 flex flex-col">
+        <div className="space-y-1">
+          {navItems.map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-ct-accent/10 text-ct-accent'
+                    : 'text-ct-text-muted hover:text-ct-text hover:bg-ct-bg-hover'
+                )
+              }
+            >
+              <Icon size={18} className="flex-shrink-0" />
+              {!collapsed && <span className="whitespace-nowrap">{label}</span>}
+            </NavLink>
+          ))}
+        </div>
+
+        {/* Account link at bottom */}
+        <div className="mt-auto pt-3 border-t border-ct-border">
           <NavLink
-            key={to}
-            to={to}
+            to={ROUTES.ACCOUNT}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
@@ -65,10 +86,10 @@ export function Sidebar() {
               )
             }
           >
-            <Icon size={18} className="flex-shrink-0" />
-            {!collapsed && <span className="whitespace-nowrap">{label}</span>}
+            <UserCog size={18} className="flex-shrink-0" />
+            {!collapsed && <span className="whitespace-nowrap">Account</span>}
           </NavLink>
-        ))}
+        </div>
       </nav>
 
       {/* Footer */}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -9,11 +9,13 @@ import { useToast } from '@/components/ui/Toast';
 import { useTradingMode, useRiskConfig, useUpdateTradingMode, useUpdateRisk } from '@/api/hooks/useConfig';
 import {
   usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair,
-  usePositions, useClosePosition,
+  usePositions, useClosePosition, useCloseAllPositions,
   usePortfolio, useEngineStatus, useStartEngine, useStopEngine,
   useActivityLog,
 } from '@/api/hooks/useTrading';
 import { formatUSD, formatAUD, formatNumber, formatTime } from '@/lib/formatters';
+import { useQueryClient } from '@tanstack/react-query';
+import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
   Play, Square, Plus, X, Zap, Activity, Search,
   TrendingUp, TrendingDown, DollarSign, ShieldAlert,
@@ -30,6 +32,7 @@ const ACTIVITY_COLORS: Record<string, string> = {
   tp: 'text-ct-green',
   signal: 'text-ct-blue',
   info: 'text-ct-text-muted',
+  error: 'text-orange-400',
 };
 
 const ACTIVITY_ICONS: Record<string, string> = {
@@ -39,9 +42,38 @@ const ACTIVITY_ICONS: Record<string, string> = {
   tp: '🎯',
   signal: '📡',
   info: 'ℹ️',
+  error: '⚠️',
 };
 
+// Events that should trigger Trading page cache invalidation
+const TRADING_WS_EVENTS = [
+  'order.created',
+  'order.filled',
+  'order.cancelled',
+  'position.opened',
+  'position.closed',
+  'risk.stop_loss_hit',
+  'risk.take_profit_hit',
+];
+
 export function TradingPage() {
+  // --- WebSocket for live updates ---
+  const queryClient = useQueryClient();
+
+  const handleWsMessage = useCallback(
+    (msg: { type: string }) => {
+      if (TRADING_WS_EVENTS.includes(msg.type)) {
+        queryClient.invalidateQueries({ queryKey: ['trading'] });
+      }
+    },
+    [queryClient],
+  );
+
+  useWebSocket({
+    subscriptions: TRADING_WS_EVENTS,
+    onMessage: handleWsMessage,
+  });
+
   // --- Local form state ---
   const [pairSearch, setPairSearch] = useState('');
   const [selectedNewPairs, setSelectedNewPairs] = useState<Set<string>>(new Set());
@@ -50,6 +82,7 @@ export function TradingPage() {
 
   // Auto-trading form state
   const [maxBuy, setMaxBuy] = useState<number | null>(null);
+  const [maxConcurrentTrades, setMaxConcurrentTrades] = useState<number | null>(null);
   const [stopLoss, setStopLoss] = useState<number | null>(null);
   const [takeProfit, setTakeProfit] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -69,6 +102,7 @@ export function TradingPage() {
   const addPairsBatch = useAddPairsBatch();
   const removePair = useRemovePair();
   const closePos = useClosePosition();
+  const closeAllPos = useCloseAllPositions();
   const startEngine = useStartEngine();
   const stopEngine = useStopEngine();
   const updateTrading = useUpdateTradingMode();
@@ -77,6 +111,7 @@ export function TradingPage() {
 
   // Initialise form values from server config (once)
   const effectiveMaxBuy = maxBuy ?? mode?.max_order_usdt ?? 100;
+  const effectiveMaxTrades = maxConcurrentTrades ?? mode?.max_open_positions ?? 5;
   const effectiveSL = stopLoss ?? (riskCfg ? riskCfg.default_stop_loss_pct * 100 : 3);
   const effectiveTP = takeProfit ?? (riskCfg ? riskCfg.default_take_profit_pct * 100 : 6);
 
@@ -95,7 +130,10 @@ export function TradingPage() {
   async function handleStartAutoTrading() {
     setIsSaving(true);
     try {
-      await updateTrading.mutateAsync({ max_order_usdt: effectiveMaxBuy });
+      await updateTrading.mutateAsync({
+        max_order_usdt: effectiveMaxBuy,
+        max_open_positions: effectiveMaxTrades,
+      });
       await updateRisk.mutateAsync({
         default_stop_loss_pct: effectiveSL / 100,
         default_take_profit_pct: effectiveTP / 100,
@@ -123,6 +161,25 @@ export function TradingPage() {
       const next = new Set(prev);
       if (next.has(symbol)) next.delete(symbol);
       else next.add(symbol);
+      return next;
+    });
+  }
+
+  // Select All: operates on the currently visible (filtered + sliced) pairs
+  const visiblePairs = filteredUnwatched.slice(0, 50);
+  const allVisibleSelected = visiblePairs.length > 0 && visiblePairs.every(p => selectedNewPairs.has(p));
+  const someVisibleSelected = visiblePairs.some(p => selectedNewPairs.has(p));
+
+  function handleSelectAll() {
+    setSelectedNewPairs(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        // Deselect all visible
+        for (const p of visiblePairs) next.delete(p);
+      } else {
+        // Select all visible
+        for (const p of visiblePairs) next.add(p);
+      }
       return next;
     });
   }
@@ -212,7 +269,7 @@ export function TradingPage() {
           <h2 className="text-base font-semibold text-ct-text">Auto-Trading</h2>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <NumberInput
             label="Max Buy Amount"
             value={effectiveMaxBuy}
@@ -221,6 +278,15 @@ export function TradingPage() {
             max={100000}
             step={10}
             suffix="USDT"
+          />
+          <NumberInput
+            label="Max Concurrent Trades"
+            value={effectiveMaxTrades}
+            onChange={v => setMaxConcurrentTrades(v)}
+            min={1}
+            max={50}
+            step={1}
+            suffix=""
           />
           <NumberInput
             label="Stop Loss"
@@ -376,7 +442,21 @@ export function TradingPage() {
                 {filteredUnwatched.length === 0 ? (
                   <p className="text-xs text-ct-text-dim py-2 text-center">No matches</p>
                 ) : (
-                  filteredUnwatched.slice(0, 50).map(p => (
+                  <>
+                  {/* Select All */}
+                  <label className="flex items-center gap-2 px-2 py-1 hover:bg-ct-bg-hover cursor-pointer text-xs border-b border-ct-border sticky top-0 bg-ct-bg z-10">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                      onChange={handleSelectAll}
+                      className="rounded border-ct-border text-ct-accent"
+                    />
+                    <span className="font-medium text-ct-text-muted">
+                      Select All ({visiblePairs.length})
+                    </span>
+                  </label>
+                  {visiblePairs.map(p => (
                     <label
                       key={p}
                       className="flex items-center gap-2 px-2 py-1 hover:bg-ct-bg-hover cursor-pointer text-xs"
@@ -389,7 +469,8 @@ export function TradingPage() {
                       />
                       <span className="font-mono text-ct-text">{p}</span>
                     </label>
-                  ))
+                  ))}
+                  </>
                 )}
               </div>
               {selectedNewPairs.size > 0 && (
@@ -409,7 +490,28 @@ export function TradingPage() {
 
         {/* Open Positions */}
         <Card className="lg:col-span-3">
-          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider mb-3">Open Positions</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">
+              Open Positions ({(positions || []).length})
+            </h3>
+            {(positions || []).length > 0 && (
+              <Button
+                variant="danger"
+                onClick={() => closeAllPos.mutate(undefined, {
+                  onSuccess: (data) => {
+                    const msg = data.failed > 0
+                      ? `Closed ${data.closed}, ${data.failed} failed`
+                      : `Closed ${data.closed} positions`;
+                    toast(msg, data.failed > 0 ? 'error' : 'success');
+                  },
+                  onError: (e) => toast(e.message, 'error'),
+                })}
+                disabled={closeAllPos.isPending}
+              >
+                <X size={12} /> Close All
+              </Button>
+            )}
+          </div>
           {(positions || []).length === 0 ? (
             <p className="text-sm text-ct-text-dim py-8 text-center">No open positions</p>
           ) : (

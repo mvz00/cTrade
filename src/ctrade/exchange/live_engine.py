@@ -1,9 +1,9 @@
-"""Paper trading engine with optional database persistence.
+"""Live trading engine — executes real orders on exchanges via ccxt.
 
-Simulates order execution, position management, and portfolio tracking
-without connecting to a real exchange.  Primary state lives in memory for
-fast reads; mutations are written through to the database asynchronously
-when a DB connection is available (fire-and-forget).
+Mirrors the PaperEngine API but routes order placement and position
+management through ccxt to a real exchange.  In-memory state is maintained
+for fast reads (orders, positions, equity curve) with async write-through
+to the database.
 """
 
 from __future__ import annotations
@@ -30,43 +30,33 @@ from ctrade.db.persistence import fire_and_forget, is_db_ready, run_db_operation
 
 logger = logging.getLogger(__name__)
 
-INITIAL_BALANCE = Decimal("10000.00")
-
 
 @dataclass
 class EquityPoint:
     """A single point on the equity curve."""
+
     timestamp: datetime
     total_value: float
     cash: float
     positions_value: float
 
 
-class PaperEngine:
-    """In-memory paper trading engine singleton."""
+class LiveEngine:
+    """Live trading engine singleton — executes real orders via ccxt."""
 
-    _instance: ClassVar[PaperEngine | None] = None
+    _instance: ClassVar[LiveEngine | None] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
-    def __init__(self, initial_balance: Decimal = INITIAL_BALANCE) -> None:
-        self._cash: dict[str, Decimal] = {"USDT": initial_balance}
+    def __init__(self) -> None:
         self._orders: list[Order] = []
         self._positions: list[Position] = []
         self._equity_curve: list[EquityPoint] = []
-        self._watched_pairs: list[str] = []
         self._data_lock = threading.Lock()
-        self._daily_pnl_start: float = float(initial_balance)
-
-        # Record initial equity
-        self._equity_curve.append(EquityPoint(
-            timestamp=datetime.now(timezone.utc),
-            total_value=float(initial_balance),
-            cash=float(initial_balance),
-            positions_value=0.0,
-        ))
+        # Cached real exchange prices for open positions (updated async)
+        self._live_prices: dict[str, float] = {}
 
     @classmethod
-    def get_instance(cls) -> PaperEngine:
+    def get_instance(cls) -> LiveEngine:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -88,25 +78,37 @@ class PaperEngine:
         except Exception:
             pass  # EventBus not running yet — swallow silently
 
-    # ---- Watched pairs ----
+    # ---- Watched pairs (delegated to PaperEngine — shared state) ----
 
     def get_watched_pairs(self) -> list[str]:
-        with self._data_lock:
-            return list(self._watched_pairs)
+        from ctrade.exchange.paper_engine import PaperEngine
+
+        return PaperEngine.get_instance().get_watched_pairs()
 
     def add_watched_pair(self, symbol: str) -> bool:
-        with self._data_lock:
-            if symbol not in self._watched_pairs:
-                self._watched_pairs.append(symbol)
-                return True
-            return False
+        from ctrade.exchange.paper_engine import PaperEngine
+
+        return PaperEngine.get_instance().add_watched_pair(symbol)
 
     def remove_watched_pair(self, symbol: str) -> bool:
-        with self._data_lock:
-            if symbol in self._watched_pairs:
-                self._watched_pairs.remove(symbol)
-                return True
-            return False
+        from ctrade.exchange.paper_engine import PaperEngine
+
+        return PaperEngine.get_instance().remove_watched_pair(symbol)
+
+    # ---- Helper: get exchange config ----
+
+    def _get_exchange_name(self) -> str:
+        """Get the name of the first configured exchange."""
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+
+            store = RuntimeConfigStore.get()
+            exchanges = store.list_exchanges()
+            if exchanges:
+                return exchanges[0]["name"]
+        except Exception:
+            pass
+        return "unknown"
 
     # ---- Order management ----
 
@@ -120,18 +122,18 @@ class PaperEngine:
         signal_id: str | None = None,
         strategy_name: str = "",
     ) -> Order:
-        """Place an order. Market orders fill immediately."""
+        """Place a real order on the exchange via ccxt."""
+        from ctrade.core.config_store import RuntimeConfigStore
         from ctrade.exchange.market_data import MarketDataProvider
 
-        market = MarketDataProvider.get_instance()
-        current_price = market.get_current_price(symbol)
+        exchange_name = self._get_exchange_name()
 
         order = Order(
             id=uuid.uuid4(),
             signal_id=uuid.UUID(signal_id) if signal_id else None,
             pair_symbol=symbol,
-            exchange_name="paper",
-            trading_mode=TradingMode.PAPER,
+            exchange_name=exchange_name,
+            trading_mode=TradingMode.LIVE,
             order_type=OrderType(order_type),
             side=OrderSide(side),
             quantity=Decimal(str(quantity)),
@@ -139,84 +141,171 @@ class PaperEngine:
             status=OrderStatus.PENDING,
         )
 
-        with self._data_lock:
-            if order_type == "market":
-                fill_price = current_price
-                cost = Decimal(str(fill_price)) * order.quantity
-                fee = cost * Decimal("0.001")  # 0.1% fee
+        # Safety: enforce max order size using REAL exchange price
+        try:
+            store = RuntimeConfigStore.get()
+            trading_cfg = store.get_trading()
+            max_order_usdt = trading_cfg.get("max_order_usdt", 100.0)
 
-                # Check balance
-                quote = symbol.split("/")[1] if "/" in symbol else "USDT"
-                base = symbol.split("/")[0] if "/" in symbol else symbol
+            market = MarketDataProvider.get_instance()
+            # Use real exchange ticker for live mode price validation
+            ticker = await market._try_ccxt_ticker(symbol)
+            if ticker is None:
+                # Try /USD pair (common on Kraken)
+                ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
+            current_price = float(ticker.last_price) if ticker else 0.0
 
-                if side == "buy":
-                    available = self._cash.get(quote, Decimal("0"))
-                    if available < cost + fee:
-                        order.status = OrderStatus.REJECTED
-                        order.error_message = f"Insufficient {quote}: need {cost + fee}, have {available}"
+            if current_price > 0:
+                order_value_usdt = float(quantity) * current_price
+
+                if order_value_usdt > max_order_usdt * 1.1:  # 10% tolerance for price movement
+                    order.status = OrderStatus.REJECTED
+                    order.error_message = (
+                        f"Order value ${order_value_usdt:.2f} exceeds max "
+                        f"${max_order_usdt:.2f}"
+                    )
+                    with self._data_lock:
                         self._orders.append(order)
-                        return order
-
-                    self._cash[quote] = available - cost - fee
-                    self._cash[base] = self._cash.get(base, Decimal("0")) + order.quantity
-                else:  # sell
-                    available = self._cash.get(base, Decimal("0"))
-                    if available < order.quantity:
-                        order.status = OrderStatus.REJECTED
-                        order.error_message = f"Insufficient {base}: need {order.quantity}, have {available}"
-                        self._orders.append(order)
-                        return order
-
-                    self._cash[base] = available - order.quantity
-                    self._cash[quote] = self._cash.get(quote, Decimal("0")) + cost - fee
-
-                order.status = OrderStatus.FILLED
-                order.filled_quantity = order.quantity
-                order.avg_fill_price = Decimal(str(fill_price))
-                order.fee = fee
-                order.fee_currency = quote
-                order.filled_at = datetime.now(timezone.utc)
-                order.updated_at = datetime.now(timezone.utc)
-
-                self._orders.append(order)
-
-                # Update positions
-                self._update_positions(order, strategy_name)
-                # Record equity
-                self._record_equity()
-
-                # Publish ORDER_FILLED event
-                self._publish(EventTypes.ORDER_FILLED, {
-                    "order_id": str(order.id),
-                    "pair": symbol,
-                    "side": side,
-                    "quantity": float(order.filled_quantity),
-                    "price": float(order.avg_fill_price or 0),
-                    "fee": float(order.fee),
-                })
-
+                    logger.warning("LIVE order rejected: %s", order.error_message)
+                    return order
             else:
-                # Limit/stop orders stay pending
-                self._orders.append(order)
+                logger.warning("Could not get real price for %s — skipping size check", symbol)
+        except Exception as e:
+            logger.warning("Could not validate order size: %s", e)
 
-        # Write-through to DB (async, non-blocking)
+        # Execute via ccxt
+        ccxt_exchange = None
+        try:
+            market = MarketDataProvider.get_instance()
+            ccxt_exchange = await market._create_ccxt_exchange()
+
+            if ccxt_exchange is None:
+                order.status = OrderStatus.REJECTED
+                order.error_message = "No exchange configured or connection failed"
+                with self._data_lock:
+                    self._orders.append(order)
+                return order
+
+            if order_type == "market":
+                if side == "buy":
+                    result = await ccxt_exchange.create_market_buy_order(symbol, quantity)
+                else:
+                    result = await ccxt_exchange.create_market_sell_order(symbol, quantity)
+            else:
+                # Limit order
+                if price is None:
+                    order.status = OrderStatus.REJECTED
+                    order.error_message = "Limit orders require a price"
+                    with self._data_lock:
+                        self._orders.append(order)
+                    return order
+                result = await ccxt_exchange.create_limit_order(
+                    symbol, side, quantity, price
+                )
+
+            # Parse ccxt response
+            exchange_order_id = result.get("id")
+            fill_price = result.get("average") or result.get("price") or 0
+            filled_qty = result.get("filled") or quantity
+            fee_info = result.get("fee") or {}
+            fee_cost = fee_info.get("cost") or 0
+            fee_currency = fee_info.get("currency") or "USDT"
+
+            # Kraken (and some exchanges) return average=None for market
+            # orders — the fill details arrive asynchronously.  Poll
+            # fetch_order once to get the actual fill price.
+            if not fill_price and exchange_order_id:
+                try:
+                    import asyncio as _aio
+                    await _aio.sleep(0.5)  # brief pause for exchange to settle
+                    fetched = await ccxt_exchange.fetch_order(exchange_order_id, symbol)
+                    fill_price = fetched.get("average") or fetched.get("price") or 0
+                    filled_qty = fetched.get("filled") or filled_qty
+                    fee_info = fetched.get("fee") or fee_info
+                    fee_cost = fee_info.get("cost") or fee_cost
+                    fee_currency = fee_info.get("currency") or fee_currency
+                except Exception as fetch_err:
+                    logger.warning("Could not fetch order details for %s: %s", exchange_order_id, fetch_err)
+
+            # Last resort: use the ticker price we already fetched for validation
+            if not fill_price:
+                try:
+                    mdp = MarketDataProvider.get_instance()
+                    _ticker = await mdp._try_ccxt_ticker(symbol)
+                    if _ticker:
+                        fill_price = float(_ticker.last_price)
+                except Exception:
+                    pass
+
+            order.status = OrderStatus.FILLED
+            order.filled_quantity = Decimal(str(filled_qty))
+            order.avg_fill_price = Decimal(str(fill_price)) if fill_price else Decimal("0")
+            order.fee = Decimal(str(fee_cost))
+            order.fee_currency = fee_currency
+            order.filled_at = datetime.now(timezone.utc)
+            order.updated_at = datetime.now(timezone.utc)
+
+            # Cache the fill price for live PnL calculations
+            if fill_price:
+                self._live_prices[symbol] = float(fill_price)
+
+            with self._data_lock:
+                self._orders.append(order)
+                self._update_positions(order, strategy_name)
+                self._record_equity_snapshot()
+
+            # Publish event
+            self._publish(EventTypes.ORDER_FILLED, {
+                "order_id": str(order.id),
+                "exchange_order_id": exchange_order_id,
+                "pair": symbol,
+                "side": side,
+                "quantity": float(order.filled_quantity),
+                "price": float(order.avg_fill_price or 0),
+                "fee": float(order.fee),
+                "mode": "live",
+            })
+
+            logger.info(
+                "LIVE %s %s: qty=%.6f @ %.4f (fee=%.4f %s) exchange_id=%s",
+                side.upper(),
+                symbol,
+                float(order.filled_quantity),
+                float(order.avg_fill_price or 0),
+                float(order.fee),
+                fee_currency,
+                exchange_order_id,
+            )
+
+        except Exception as e:
+            order.status = OrderStatus.REJECTED
+            order.error_message = f"Exchange error: {e}"
+            with self._data_lock:
+                self._orders.append(order)
+            logger.error("LIVE order failed for %s: %s", symbol, e)
+        finally:
+            if ccxt_exchange:
+                try:
+                    await ccxt_exchange.close()
+                except Exception:
+                    pass
+
+        # Persist to DB
         fire_and_forget(self._persist_order_async(order))
         return order
 
     def _update_positions(self, order: Order, strategy_name: str = "") -> None:
-        """Update positions after a filled order."""
+        """Update positions after a filled order (must hold _data_lock)."""
         if order.side == OrderSide.BUY:
-            # Check for existing short position to close
             existing = self._find_open_position(order.pair_symbol, PositionSide.SHORT)
             if existing:
                 self._close_position_internal(existing, order)
             else:
-                # Open new long position
                 pos = Position(
                     id=uuid.uuid4(),
                     pair_symbol=order.pair_symbol,
-                    exchange_name="paper",
-                    trading_mode=TradingMode.PAPER,
+                    exchange_name=order.exchange_name,
+                    trading_mode=TradingMode.LIVE,
                     side=PositionSide.LONG,
                     status=PositionStatus.OPEN,
                     entry_price=order.avg_fill_price or Decimal("0"),
@@ -233,6 +322,7 @@ class PaperEngine:
                     "side": "long",
                     "entry_price": float(pos.entry_price),
                     "quantity": float(pos.quantity),
+                    "mode": "live",
                 })
 
         elif order.side == OrderSide.SELL:
@@ -243,8 +333,8 @@ class PaperEngine:
                 pos = Position(
                     id=uuid.uuid4(),
                     pair_symbol=order.pair_symbol,
-                    exchange_name="paper",
-                    trading_mode=TradingMode.PAPER,
+                    exchange_name=order.exchange_name,
+                    trading_mode=TradingMode.LIVE,
                     side=PositionSide.SHORT,
                     status=PositionStatus.OPEN,
                     entry_price=order.avg_fill_price or Decimal("0"),
@@ -261,6 +351,7 @@ class PaperEngine:
                     "side": "short",
                     "entry_price": float(pos.entry_price),
                     "quantity": float(pos.quantity),
+                    "mode": "live",
                 })
 
     def _find_open_position(self, symbol: str, side: PositionSide) -> Position | None:
@@ -286,12 +377,18 @@ class PaperEngine:
             if pos.entry_price > 0:
                 pos.realized_pnl_pct = (pnl / (pos.entry_price * pos.quantity)) * 100
 
-        # Persist closed position + cash snapshot
         fire_and_forget(self._persist_position_async(pos))
-        fire_and_forget(self._persist_cash_snapshot_async())
+
+        self._publish(EventTypes.POSITION_CLOSED, {
+            "position_id": str(pos.id),
+            "pair": pos.pair_symbol,
+            "pnl": float(pos.realized_pnl or 0),
+            "pnl_pct": float(pos.realized_pnl_pct or 0),
+            "mode": "live",
+        })
 
     async def close_position(self, position_id: str) -> Order | None:
-        """Close a position at market price."""
+        """Close a position at market price via real exchange order."""
         with self._data_lock:
             pos = None
             for p in self._positions:
@@ -301,7 +398,6 @@ class PaperEngine:
             if not pos:
                 return None
 
-        # Place opposite order
         side = "sell" if pos.side == PositionSide.LONG else "buy"
         order = await self.place_order(
             symbol=pos.pair_symbol,
@@ -318,27 +414,42 @@ class PaperEngine:
 
         return order
 
-    def _record_equity(self) -> None:
-        """Record current portfolio value to equity curve."""
+    async def refresh_live_prices(self) -> None:
+        """Refresh cached real exchange prices for all open position symbols."""
         from ctrade.exchange.market_data import MarketDataProvider
+
         market = MarketDataProvider.get_instance()
 
-        cash_total = sum(
-            float(v) if k == "USDT" else float(v) * market.get_current_price(f"{k}/USDT")
-            for k, v in self._cash.items()
-            if float(v) > 0
-        )
+        with self._data_lock:
+            symbols = list({
+                p.pair_symbol for p in self._positions
+                if p.status == PositionStatus.OPEN
+            })
+
+        for symbol in symbols:
+            try:
+                ticker = await market._try_ccxt_ticker(symbol)
+                if ticker is None:
+                    ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
+                if ticker:
+                    self._live_prices[symbol] = float(ticker.last_price)
+            except Exception:
+                logger.debug("Could not refresh price for %s", symbol)
+
+    def _record_equity_snapshot(self) -> None:
+        """Record a portfolio equity snapshot (call after order fills)."""
         positions_value = 0.0
         for pos in self._positions:
             if pos.status == PositionStatus.OPEN:
-                price = market.get_current_price(pos.pair_symbol)
+                price = self._live_prices.get(pos.pair_symbol, float(pos.entry_price))
                 positions_value += float(pos.quantity) * price
 
-        total = cash_total + positions_value
+        # We don't track cash for live — total comes from exchange
+        total = positions_value  # approximate; full value fetched async
         self._equity_curve.append(EquityPoint(
             timestamp=datetime.now(timezone.utc),
             total_value=round(total, 2),
-            cash=round(cash_total, 2),
+            cash=0.0,
             positions_value=round(positions_value, 2),
         ))
 
@@ -359,68 +470,67 @@ class PaperEngine:
             result = []
             for p in reversed(positions):
                 d = self._position_to_dict(p)
-                # Add unrealized P&L for open positions
                 if p.status == PositionStatus.OPEN:
-                    from ctrade.exchange.market_data import MarketDataProvider
-                    market = MarketDataProvider.get_instance()
-                    current = Decimal(str(market.get_current_price(p.pair_symbol)))
+                    # Use cached real price for live positions (updated by _refresh_live_prices)
+                    current = self._live_prices.get(p.pair_symbol)
+                    if current is None:
+                        # Fallback: use entry price (PnL = 0) rather than fake simulated price
+                        current = p.entry_price
+                    else:
+                        current = Decimal(str(current))
                     if p.side == PositionSide.LONG:
                         unrealized = (current - p.entry_price) * p.quantity
                     else:
                         unrealized = (p.entry_price - current) * p.quantity
                     d["unrealized_pnl"] = float(unrealized)
-                    d["unrealized_pnl_pct"] = float(
-                        unrealized / (p.entry_price * p.quantity) * 100
-                    ) if p.entry_price > 0 else 0.0
+                    d["unrealized_pnl_pct"] = (
+                        float(unrealized / (p.entry_price * p.quantity) * 100)
+                        if p.entry_price > 0
+                        else 0.0
+                    )
                     d["current_price"] = float(current)
                 result.append(d)
             return result
 
     async def get_portfolio(self) -> dict[str, Any]:
-        with self._data_lock:
-            from ctrade.exchange.market_data import MarketDataProvider
-            market = MarketDataProvider.get_instance()
+        """Get portfolio from real exchange balances."""
+        from ctrade.exchange.market_data import MarketDataProvider
 
-            cash_usd = float(self._cash.get("USDT", Decimal("0")))
-            positions_value = 0.0
-            unrealized_pnl = 0.0
+        market = MarketDataProvider.get_instance()
+        live_portfolio = await market.fetch_exchange_portfolio()
 
-            for pos in self._positions:
-                if pos.status == PositionStatus.OPEN:
-                    price = market.get_current_price(pos.pair_symbol)
-                    val = float(pos.quantity) * price
-                    positions_value += val
-                    entry_val = float(pos.entry_price * pos.quantity)
-                    if pos.side == PositionSide.LONG:
-                        unrealized_pnl += val - entry_val
-                    else:
-                        unrealized_pnl += entry_val - val
+        if live_portfolio:
+            # Augment with position data from our tracking
+            with self._data_lock:
+                open_count = sum(
+                    1 for p in self._positions if p.status == PositionStatus.OPEN
+                )
+                closed_count = sum(
+                    1 for p in self._positions if p.status == PositionStatus.CLOSED
+                )
+                total_realized = sum(
+                    float(p.realized_pnl or 0)
+                    for p in self._positions
+                    if p.status == PositionStatus.CLOSED
+                )
+            live_portfolio["open_positions"] = open_count
+            live_portfolio["closed_positions"] = closed_count
+            live_portfolio["realized_pnl"] = round(total_realized, 2)
+            live_portfolio["total_orders"] = len(self._orders)
+            return live_portfolio
 
-            total = cash_usd + positions_value
-            daily_pnl = total - self._daily_pnl_start
-
-            open_count = sum(
-                1 for p in self._positions if p.status == PositionStatus.OPEN
-            )
-            closed_count = sum(
-                1 for p in self._positions if p.status == PositionStatus.CLOSED
-            )
-            total_realized = sum(
-                float(p.realized_pnl or 0)
-                for p in self._positions if p.status == PositionStatus.CLOSED
-            )
-
-            return {
-                "cash_balance": {k: float(v) for k, v in self._cash.items()},
-                "total_value_usd": round(total, 2),
-                "positions_value": round(positions_value, 2),
-                "unrealized_pnl": round(unrealized_pnl, 2),
-                "realized_pnl": round(total_realized, 2),
-                "daily_pnl": round(daily_pnl, 2),
-                "open_positions": open_count,
-                "closed_positions": closed_count,
-                "total_orders": len(self._orders),
-            }
+        # Fallback: build from in-memory state
+        return {
+            "cash_balance": {},
+            "total_value_usd": 0.0,
+            "positions_value": 0.0,
+            "unrealized_pnl": 0.0,
+            "realized_pnl": 0.0,
+            "daily_pnl": 0.0,
+            "open_positions": 0,
+            "closed_positions": 0,
+            "total_orders": len(self._orders),
+        }
 
     def get_equity_curve(self) -> list[dict[str, Any]]:
         with self._data_lock:
@@ -446,95 +556,69 @@ class PaperEngine:
     # ---- Database persistence ----
 
     async def hydrate_from_db(self) -> None:
-        """Load persisted state from database.  Called once at startup."""
+        """Load persisted live-mode state from database."""
         if not is_db_ready():
-            logger.info("DB not available — PaperEngine starting with empty in-memory state")
+            logger.info("DB not available — LiveEngine starting with empty in-memory state")
             return
 
         async def _load(session, resolver):
             from sqlalchemy import select
-            from ctrade.db.mappers import orm_to_order, orm_to_position
-            from ctrade.db.models import OrderModel, PositionModel, PortfolioSnapshotModel
 
-            # Load orders
-            stmt = select(OrderModel).where(OrderModel.trading_mode == "paper")
+            from ctrade.db.mappers import orm_to_order, orm_to_position
+            from ctrade.db.models import OrderModel, PositionModel
+
+            # Load live orders
+            stmt = select(OrderModel).where(OrderModel.trading_mode == "live")
             orm_orders = (await session.execute(stmt)).scalars().all()
             orders = [orm_to_order(o, resolver) for o in orm_orders]
 
-            # Load positions
-            stmt = select(PositionModel).where(PositionModel.trading_mode == "paper")
+            # Load live positions
+            stmt = select(PositionModel).where(PositionModel.trading_mode == "live")
             orm_positions = (await session.execute(stmt)).scalars().all()
             positions = [orm_to_position(p, resolver) for p in orm_positions]
 
-            # Load latest cash snapshot
-            stmt = (
-                select(PortfolioSnapshotModel)
-                .where(PortfolioSnapshotModel.trading_mode == "paper")
-                .order_by(PortfolioSnapshotModel.time.desc())
-                .limit(1)
-            )
-            snapshot = (await session.execute(stmt)).scalar_one_or_none()
+            return orders, positions
 
-            return orders, positions, snapshot
-
-        loaded = await run_db_operation(_load, description="hydrate PaperEngine")
+        loaded = await run_db_operation(_load, description="hydrate LiveEngine")
         if loaded is None:
             return
 
-        orders, positions, snapshot = loaded
+        orders, positions = loaded
         with self._data_lock:
             if orders:
                 self._orders = orders
             if positions:
                 self._positions = positions
-            if snapshot and snapshot.cash_balance:
-                self._cash = {
-                    k: Decimal(str(v)) for k, v in snapshot.cash_balance.items()
-                }
-                self._daily_pnl_start = float(snapshot.total_value_usd or 0)
 
         logger.info(
-            "Hydrated PaperEngine from DB: %d orders, %d positions",
+            "Hydrated LiveEngine from DB: %d orders, %d positions",
             len(orders),
             len(positions),
         )
 
     async def _persist_order_async(self, order: Order) -> None:
         """Write-through: persist a single order to the database."""
+
         async def _do(session, resolver):
             from ctrade.db.mappers import order_to_orm
+
             orm_order = await order_to_orm(order, resolver)
             await session.merge(orm_order)
-        await run_db_operation(_do, description="persist order")
+
+        await run_db_operation(_do, description="persist live order")
 
     async def _persist_position_async(self, position: Position) -> None:
         """Write-through: persist a single position to the database."""
+
         async def _do(session, resolver):
             from ctrade.db.mappers import position_to_orm
+
             orm_pos = await position_to_orm(position, resolver)
             await session.merge(orm_pos)
-        await run_db_operation(_do, description="persist position")
 
-    async def _persist_cash_snapshot_async(self) -> None:
-        """Write-through: persist current cash balances as a portfolio snapshot."""
-        async def _do(session, resolver):
-            from ctrade.db.models import PortfolioSnapshotModel
-            exchange_id = await resolver.get_exchange_id("paper")
-            open_count = sum(
-                1 for p in self._positions if p.status == PositionStatus.OPEN
-            )
-            total_usd = sum(float(v) for v in self._cash.values())
-            snapshot = PortfolioSnapshotModel(
-                exchange_id=exchange_id,
-                trading_mode="paper",
-                total_value_usd=round(total_usd, 2),
-                cash_balance={k: float(v) for k, v in self._cash.items()},
-                open_positions=open_count,
-            )
-            session.add(snapshot)
-        await run_db_operation(_do, description="persist cash snapshot")
+        await run_db_operation(_do, description="persist live position")
 
-    # ---- Serialization ----
+    # ---- Serialization (same as PaperEngine) ----
 
     @staticmethod
     def _order_to_dict(o: Order) -> dict[str, Any]:

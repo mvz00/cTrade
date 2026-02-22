@@ -135,6 +135,8 @@ class AlertManager:
                     config.is_active = False  # One-shot trigger
                     fire_and_forget(self._persist_trigger(trigger))
                     fire_and_forget(self._update_alert_config_db(config))
+                    # Dispatch notification in background
+                    fire_and_forget(self._dispatch_notification(trigger))
         return triggered
 
     def check_signal(self, symbol: str, action: str) -> list[dict[str, Any]]:
@@ -164,7 +166,29 @@ class AlertManager:
                     config.is_active = False
                     fire_and_forget(self._persist_trigger(trigger))
                     fire_and_forget(self._update_alert_config_db(config))
+                    fire_and_forget(self._dispatch_notification(trigger))
         return triggered
+
+    async def _dispatch_notification(self, trigger: AlertTrigger) -> None:
+        """Dispatch a triggered alert to all notification channels."""
+        try:
+            from ctrade.notifications.channels.router import NotificationRouter
+            router = NotificationRouter.get_instance()
+            if not router.list_channels():
+                return  # No channels registered
+            severity = "critical" if "price" in trigger.alert_type else "warning"
+            await router.dispatch(
+                message=trigger.message,
+                severity=severity,
+                metadata={
+                    "title": f"Alert: {trigger.alert_type}",
+                    "pair": trigger.symbol,
+                    "alert_type": trigger.alert_type,
+                    "value": trigger.triggered_value,
+                },
+            )
+        except Exception:
+            logger.debug("Notification dispatch failed for alert %s", trigger.id, exc_info=True)
 
     def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
         with self._data_lock:

@@ -23,9 +23,13 @@ def compute_rsi(
 ) -> dict[str, Any]:
     """Compute RSI and return normalized score.
 
-    Score mapping: RSI < 30 (oversold) → bullish (0.7-1.0)
-                   RSI > 70 (overbought) → bearish (0.0-0.3)
-                   RSI 30-70 → neutral (0.3-0.7)
+    Score mapping:
+        RSI <= 30 (oversold)   → strongly bullish (0.75-1.0)
+        RSI  30-40             → bullish (0.60-0.75)
+        RSI  40-50             → slightly bullish (0.52-0.60)
+        RSI  50-60             → slightly bearish (0.40-0.48)
+        RSI  60-70             → bearish (0.25-0.40)
+        RSI >= 70 (overbought) → strongly bearish (0.0-0.25)
     """
     try:
         import pandas_ta as ta
@@ -43,16 +47,31 @@ def compute_rsi(
 
     rsi_val = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else 50.0
 
-    # Normalize to 0-1 score (inverted: low RSI = bullish = high score)
+    # Wider scoring with directional bias
     if rsi_val <= 30:
-        score = 0.7 + (30 - rsi_val) / 30 * 0.3
+        # Strongly oversold → strong buy signal
+        score = 0.75 + (30 - rsi_val) / 30 * 0.25  # 0.75-1.0
         signal = "oversold"
-    elif rsi_val >= 70:
-        score = 0.3 - (rsi_val - 70) / 30 * 0.3
-        signal = "overbought"
+    elif rsi_val <= 40:
+        # Mildly oversold → buy-leaning
+        score = 0.60 + (40 - rsi_val) / 10 * 0.15  # 0.60-0.75
+        signal = "buy_zone"
+    elif rsi_val <= 50:
+        # Slightly below center → mild bullish bias
+        score = 0.52 + (50 - rsi_val) / 10 * 0.08  # 0.52-0.60
+        signal = "neutral_bullish"
+    elif rsi_val <= 60:
+        # Slightly above center → mild bearish bias
+        score = 0.40 + (60 - rsi_val) / 10 * 0.08  # 0.40-0.48
+        signal = "neutral_bearish"
+    elif rsi_val <= 70:
+        # Mildly overbought → sell-leaning
+        score = 0.25 + (70 - rsi_val) / 10 * 0.15  # 0.25-0.40
+        signal = "sell_zone"
     else:
-        score = 0.3 + (70 - rsi_val) / 40 * 0.4
-        signal = "neutral"
+        # Strongly overbought → strong sell signal
+        score = 0.25 - min(0.25, (rsi_val - 70) / 30 * 0.25)  # 0.0-0.25
+        signal = "overbought"
 
     return {"value": round(rsi_val, 2), "score": round(max(0, min(1, score)), 4), "signal": signal}
 
@@ -62,8 +81,10 @@ def compute_macd(
 ) -> dict[str, Any]:
     """Compute MACD and return normalized score.
 
-    Score: histogram positive & rising → bullish
-           histogram negative & falling → bearish
+    Score: histogram positive & rising → strongly bullish (0.70-1.0)
+           histogram positive & flat   → bullish (0.60-0.65)
+           histogram negative & flat   → bearish (0.35-0.40)
+           histogram negative & falling → strongly bearish (0.0-0.30)
     """
     try:
         import pandas_ta as ta
@@ -95,29 +116,33 @@ def compute_macd(
     hist_val = float(histogram)
     prev_hist = float(prev_histogram) if not pd.isna(prev_histogram) else 0.0
 
-    # Score based on histogram direction and crossover
+    # Score based on histogram direction and magnitude
     if hist_val > 0 and hist_val > prev_hist:
-        score = 0.7 + min(0.3, abs(hist_val) / (abs(macd_val) + 1e-8) * 0.3)
+        # Positive and rising → strong bullish
+        score = 0.70 + min(0.30, abs(hist_val) / (abs(macd_val) + 1e-8) * 0.30)
         signal = "bullish_momentum"
     elif hist_val > 0:
-        score = 0.55
+        # Positive but flat/declining → moderate bullish
+        score = 0.62
         signal = "bullish"
     elif hist_val < 0 and hist_val < prev_hist:
-        score = 0.3 - min(0.3, abs(hist_val) / (abs(macd_val) + 1e-8) * 0.3)
+        # Negative and falling → strong bearish
+        score = 0.30 - min(0.30, abs(hist_val) / (abs(macd_val) + 1e-8) * 0.30)
         signal = "bearish_momentum"
     elif hist_val < 0:
-        score = 0.45
+        # Negative but flat/recovering → moderate bearish
+        score = 0.38
         signal = "bearish"
     else:
         score = 0.5
         signal = "neutral"
 
-    # Crossover bonus
+    # Crossover bonus — these are strong directional signals
     if prev_hist < 0 < hist_val:
-        score = min(1.0, score + 0.15)
+        score = min(1.0, score + 0.20)
         signal = "bullish_crossover"
     elif prev_hist > 0 > hist_val:
-        score = max(0.0, score - 0.15)
+        score = max(0.0, score - 0.20)
         signal = "bearish_crossover"
 
     return {
@@ -135,6 +160,7 @@ def compute_bollinger_bands(
 
     Score: price near lower band → bullish (potential bounce)
            price near upper band → bearish (potential reversal)
+           Also factors in momentum: price moving toward lower = more bullish.
     """
     try:
         import pandas_ta as ta
@@ -156,18 +182,34 @@ def compute_bollinger_bands(
         return {"upper": 0, "middle": 0, "lower": 0, "score": 0.5, "signal": "neutral"}
 
     price = float(df["close"].iloc[-1])
+    prev_price = float(df["close"].iloc[-2]) if len(df) > 1 else price
     band_width = upper - lower
 
     # Position within bands (0=lower, 1=upper)
     position = (price - lower) / band_width if band_width > 0 else 0.5
 
-    # Score: near lower band = bullish (buy zone), near upper = bearish (sell zone)
+    # Base score: near lower band = bullish, near upper = bearish
     score = 1.0 - position  # Invert: low position = high score
+
+    # Momentum modifier: if price is moving down toward lower band,
+    # increase bullish score; if moving up toward upper band, increase bearish
+    price_momentum = (price - prev_price) / prev_price if prev_price > 0 else 0
+
+    if position < 0.4 and price_momentum < 0:
+        # Price below middle and falling → stronger buy signal
+        score = min(1.0, score + 0.08)
+    elif position > 0.6 and price_momentum > 0:
+        # Price above middle and rising → stronger sell signal
+        score = max(0.0, score - 0.08)
 
     if position < 0.2:
         signal = "near_lower"
     elif position > 0.8:
         signal = "near_upper"
+    elif position < 0.45:
+        signal = "lower_half"
+    elif position > 0.55:
+        signal = "upper_half"
     else:
         signal = "mid_band"
 
@@ -188,7 +230,7 @@ def compute_ema_cross(
 
     Score: short EMA above long EMA → bullish
            short EMA below long EMA → bearish
-           Recent crossover → stronger signal
+           Recent crossover → much stronger signal
     """
     try:
         import pandas_ta as ta
@@ -209,18 +251,18 @@ def compute_ema_cross(
     if pd.isna(short_val) or pd.isna(long_val):
         return {"short_ema": 0, "long_ema": 0, "score": 0.5, "signal": "neutral"}
 
-    # Distance between EMAs relative to price
+    # Distance between EMAs relative to price — scale up so small divergences matter
     distance = (short_val - long_val) / long_val if long_val != 0 else 0
 
-    # Base score from EMA relationship
-    score = 0.5 + distance * 10  # Scale up the distance
+    # Base score: wider scaling so even 0.5% EMA gap gives directional signal
+    score = 0.5 + distance * 25  # Scaled up from 10 → 25
 
-    # Crossover detection
+    # Crossover detection — strong signals
     if prev_short <= prev_long and short_val > long_val:
-        score = min(1.0, score + 0.2)
+        score = min(1.0, score + 0.25)
         signal = "golden_cross"
     elif prev_short >= prev_long and short_val < long_val:
-        score = max(0.0, score - 0.2)
+        score = max(0.0, score - 0.25)
         signal = "death_cross"
     elif short_val > long_val:
         signal = "bullish_trend"

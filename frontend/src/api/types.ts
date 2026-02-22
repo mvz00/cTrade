@@ -1,3 +1,28 @@
+// ---- Auth ----
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in_minutes: number;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+export interface ChangePasswordResponse {
+  message: string;
+  new_password_hash: string;
+}
+
+// ---- Core ----
+
 export interface HealthResponse {
   status: 'ok' | 'error';
   service: string;

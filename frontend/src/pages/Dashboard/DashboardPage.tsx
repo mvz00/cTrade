@@ -5,28 +5,67 @@ import { Badge } from '@/components/ui/Badge';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Spinner } from '@/components/ui/Spinner';
+import { EquityCurveChart } from '@/components/charts/EquityCurveChart';
+import { PortfolioDonut } from '@/components/charts/PortfolioDonut';
 import { formatUSD, formatRelative } from '@/lib/formatters';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
+import { useWebSocket } from '@/api/hooks/useWebSocket';
+import { useCallback } from 'react';
 import {
   DollarSign, TrendingUp, BarChart3, Radio, Layers, Activity,
 } from 'lucide-react';
 
+// Events that should trigger Dashboard cache invalidation
+const DASHBOARD_WS_EVENTS = [
+  'signal.generated',
+  'order.filled',
+  'position.opened',
+  'position.closed',
+  'risk.stop_loss_hit',
+  'risk.take_profit_hit',
+  'alert.triggered',
+];
+
 export function DashboardPage() {
+  const queryClient = useQueryClient();
+
+  // WebSocket: invalidate React Query cache on relevant events
+  const handleWsMessage = useCallback(
+    (msg: { type: string }) => {
+      if (DASHBOARD_WS_EVENTS.includes(msg.type)) {
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['trading'] });
+        queryClient.invalidateQueries({ queryKey: ['signals'] });
+      }
+    },
+    [queryClient],
+  );
+
+  const { connected: wsConnected } = useWebSocket({
+    subscriptions: DASHBOARD_WS_EVENTS,
+    onMessage: handleWsMessage,
+  });
+
   const { data: summary, isLoading } = useDashboardSummary();
   const { data: health } = useHealth();
   const { data: status } = useQuery({ queryKey: ['dashboard', 'status'], queryFn: api.systemStatus, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
+  const { data: equityCurve } = useQuery({ queryKey: ['dashboard', 'equity-curve'], queryFn: api.equityCurve, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
+  const { data: portfolio } = useQuery({ queryKey: ['trading', 'portfolio'], queryFn: api.portfolio, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
   const { data: positions } = useQuery({ queryKey: ['trading', 'positions', 'open'], queryFn: () => api.listPositions('open'), refetchInterval: REFETCH_INTERVALS.DASHBOARD });
   const { data: signals } = useQuery({ queryKey: ['signals', { limit: 10 }], queryFn: () => api.listSignals({ limit: 10 }), refetchInterval: REFETCH_INTERVALS.SIGNALS });
   const { data: recentTrades } = useQuery({ queryKey: ['dashboard', 'recent-trades'], queryFn: api.recentTrades, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
 
   if (isLoading) return <Spinner />;
 
+  const watchedPairs = (status as any)?.watched_pairs ?? 0;
+
   return (
     <div>
       <PageHeader title="Dashboard" description="Portfolio overview and system status" />
 
+      {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <Card>
           <div className="flex items-center gap-3 mb-3"><div className="p-2 rounded-lg bg-ct-accent/10"><DollarSign size={18} className="text-ct-accent" /></div><CardTitle>Portfolio Value</CardTitle></div>
@@ -50,6 +89,25 @@ export function DashboardPage() {
         </Card>
       </div>
 
+      {/* Equity Curve + Portfolio Donut */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <Card className="lg:col-span-2">
+          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider mb-4">Equity Curve</h3>
+          <EquityCurveChart data={equityCurve ?? []} />
+        </Card>
+        <Card>
+          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider mb-4">Portfolio Breakdown</h3>
+          {portfolio ? (
+            <PortfolioDonut portfolio={portfolio} />
+          ) : (
+            <div className="flex items-center justify-center h-48 text-ct-text-dim">
+              <p className="text-sm">No portfolio data</p>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* System Status + Positions + Signals */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* System Status */}
         <Card>
@@ -64,8 +122,20 @@ export function DashboardPage() {
             {!status && (
               <>
                 <div className="flex items-center justify-between py-2 border-b border-ct-border"><span className="text-sm text-ct-text">API Server</span><StatusDot status={health?.status === 'ok' ? 'ok' : 'error'} label={health?.status === 'ok' ? 'Online' : 'Offline'} /></div>
-                <div className="flex items-center justify-between py-2"><span className="text-sm text-ct-text">Event Bus</span><StatusDot status="ok" label="Running" /></div>
+                <div className="flex items-center justify-between py-2 border-b border-ct-border"><span className="text-sm text-ct-text">Event Bus</span><StatusDot status="ok" label="Running" /></div>
               </>
+            )}
+            {/* WebSocket status */}
+            <div className="flex items-center justify-between py-2 border-b border-ct-border">
+              <span className="text-sm text-ct-text">WebSocket</span>
+              <StatusDot status={wsConnected ? 'ok' : 'error'} label={wsConnected ? 'Connected' : 'Disconnected'} />
+            </div>
+            {/* Watched pairs count */}
+            {watchedPairs > 0 && (
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm text-ct-text">Watched Pairs</span>
+                <span className="text-sm text-ct-text-muted font-medium">{watchedPairs}</span>
+              </div>
             )}
           </div>
         </Card>

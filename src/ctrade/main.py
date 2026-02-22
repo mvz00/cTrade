@@ -76,12 +76,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Hydrate singletons from DB (non-fatal if anything goes wrong)
     if _db_available:
         try:
+            from ctrade.exchange.live_engine import LiveEngine
             from ctrade.exchange.paper_engine import PaperEngine
             from ctrade.notifications.alert_manager import AlertManager
             from ctrade.strategy.orchestrator import TradingOrchestrator
             from ctrade.strategy.signal_manager import SignalManager
 
             await PaperEngine.get_instance().hydrate_from_db()
+            await LiveEngine.get_instance().hydrate_from_db()
             await SignalManager.get_instance().hydrate_from_db()
             await AlertManager.get_instance().hydrate_from_db()
             await TradingOrchestrator.get_instance().hydrate_from_db()
@@ -89,10 +91,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("Singleton hydration failed (non-fatal): %s", e)
 
-    # Start event bus
-    _event_bus = EventBus()
+    # Start event bus (singleton — accessible via EventBus.get_instance())
+    _event_bus = EventBus.get_instance()
     await _event_bus.start()
+    app.state.event_bus = _event_bus
     logger.info("Event bus started")
+
+    # Wire WebSocket event forwarder
+    from ctrade.api.websocket import register_event_forwarder
+    register_event_forwarder(_event_bus)
 
     # Start data feeds (each is no-op if preconditions not met)
     from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
@@ -107,6 +114,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     onchain_feed = OnChainFeed.get_instance()
     await onchain_feed.start()
+
+    # Register notification channels (optional — only when env vars are set)
+    from ctrade.notifications.channels.router import NotificationRouter
+    notification_router = NotificationRouter.get_instance()
+
+    if settings.discord.enabled and settings.discord.webhook_url.get_secret_value():
+        from ctrade.notifications.channels.discord import DiscordChannel
+        notification_router.register(
+            DiscordChannel(settings.discord.webhook_url.get_secret_value())
+        )
+
+    if settings.telegram.enabled and settings.telegram.bot_token.get_secret_value():
+        from ctrade.notifications.channels.telegram import TelegramChannel
+        notification_router.register(
+            TelegramChannel(
+                settings.telegram.bot_token.get_secret_value(),
+                settings.telegram.chat_id,
+            )
+        )
+
+    if notification_router.list_channels():
+        logger.info("Notification channels active: %s", ", ".join(notification_router.list_channels()))
 
     logger.info("cTrade startup complete — visit http://%s:%d", settings.api_host, settings.api_port)
 

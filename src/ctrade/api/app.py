@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from ctrade.api.middleware import setup_middleware
 from ctrade.api.routers import (
     alerts,
+    auth,
     backtest,
     config,
     dashboard,
@@ -26,6 +27,7 @@ from ctrade.api.routers import (
     signals,
     trading,
 )
+from ctrade.api.websocket import router as ws_router
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,14 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         RuntimeConfigStore.initialize(settings)
         logger.info("Runtime config store initialized (default lifespan)")
 
-    # Start event bus
-    event_bus = EventBus()
+    # Start event bus (singleton)
+    event_bus = EventBus.get_instance()
     await event_bus.start()
+    app.state.event_bus = event_bus
+
+    # Wire WebSocket event forwarder
+    from ctrade.api.websocket import register_event_forwarder
+    register_event_forwarder(event_bus)
 
     # Initialize database (non-fatal)
     db_available = False
@@ -80,12 +87,14 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Hydrate singletons from DB
     if db_available:
         try:
+            from ctrade.exchange.live_engine import LiveEngine
             from ctrade.exchange.paper_engine import PaperEngine
             from ctrade.notifications.alert_manager import AlertManager
             from ctrade.strategy.orchestrator import TradingOrchestrator
             from ctrade.strategy.signal_manager import SignalManager
 
             await PaperEngine.get_instance().hydrate_from_db()
+            await LiveEngine.get_instance().hydrate_from_db()
             await SignalManager.get_instance().hydrate_from_db()
             await AlertManager.get_instance().hydrate_from_db()
             await TradingOrchestrator.get_instance().hydrate_from_db()
@@ -143,6 +152,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     setup_middleware(app)
 
     # API routers (must be registered before the static catch-all)
+    app.include_router(auth.router, prefix="/api/v1")
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(config.router, prefix="/api/v1")
@@ -154,6 +164,9 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(screener.router, prefix="/api/v1")
     app.include_router(sentiment.router, prefix="/api/v1")
     app.include_router(onchain.router, prefix="/api/v1")
+
+    # WebSocket
+    app.include_router(ws_router, prefix="/api/v1")
 
     # Serve React SPA if the build exists, otherwise fall back to landing page
     if _FRONTEND_DIR.is_dir() and (_FRONTEND_DIR / "index.html").exists():

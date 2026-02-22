@@ -73,6 +73,17 @@ export function useClosePosition() {
   });
 }
 
+export function useCloseAllPositions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.closeAllPositions(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trading'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
 export function usePortfolio() {
   return useQuery({
     queryKey: ['trading', 'portfolio'],

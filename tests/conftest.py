@@ -9,6 +9,8 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import os
+
 from ctrade.api.app import create_app
 from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.core.enums import (
@@ -24,6 +26,20 @@ from ctrade.core.enums import (
 from ctrade.core.events import EventBus
 from ctrade.core.models import Candle, Order, Position, Signal
 from ctrade.settings import AppSettings
+
+
+@pytest.fixture(autouse=True)
+def _disable_auth_for_tests(monkeypatch):
+    """Disable auth by default for all tests.
+
+    Tests that need auth enabled should explicitly set CTRADE_AUTH__ENABLED=true
+    via monkeypatch and clear the settings cache.
+    """
+    from ctrade.settings import get_settings
+    get_settings.cache_clear()
+    monkeypatch.setenv("CTRADE_AUTH__ENABLED", "false")
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -43,30 +59,35 @@ def event_bus() -> EventBus:
 
 
 @pytest.fixture(autouse=True)
-def _init_config_store(app_settings):
+def _init_config_store(app_settings, tmp_path, monkeypatch):
     """Initialize the runtime config store for every test.
 
-    Removes the persisted state file so tests start with clean defaults.
+    Redirects the persisted state file to a temp directory so tests never
+    touch the real ``config/runtime_state.json`` (which stores user data
+    like exchange credentials).
     """
-    from ctrade.core.config_store import _STATE_FILE
+    import ctrade.core.config_store as cs_mod
 
-    # Remove any persisted state so tests get clean defaults
-    if _STATE_FILE.exists():
-        _STATE_FILE.unlink()
+    test_state_file = tmp_path / "runtime_state.json"
+    monkeypatch.setattr(cs_mod, "_STATE_FILE", test_state_file)
 
     RuntimeConfigStore.initialize(app_settings)
     yield
     RuntimeConfigStore.reset()
 
-    # Clean up any state file written during the test
-    if _STATE_FILE.exists():
-        _STATE_FILE.unlink()
-
 
 @pytest.fixture
-def app():
-    """Provide a FastAPI test application."""
-    return create_app()
+def app(monkeypatch):
+    """Provide a FastAPI test application with auth disabled."""
+    from ctrade.settings import get_settings
+    get_settings.cache_clear()
+
+    monkeypatch.setenv("CTRADE_AUTH__ENABLED", "false")
+
+    _app = create_app()
+    yield _app
+
+    get_settings.cache_clear()
 
 
 @pytest.fixture

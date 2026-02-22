@@ -224,6 +224,34 @@ class CoinMarketCapFeed:
         )
         return round(max(0.0, min(1.0, composite)), 4)
 
+    def get_volatility_info(self, pair_symbol: str) -> dict[str, Any] | None:
+        """Get short-term volatility info for a trading pair.
+
+        Returns key CMC metrics used for momentum-based pair ranking,
+        or ``None`` if no CMC data is available.
+        """
+        if not self._enabled or not self._listings:
+            return None
+
+        base_symbol = pair_symbol.split("/")[0]
+        listing = self._listings_by_symbol.get(base_symbol)
+        if listing is None:
+            return None
+
+        return {
+            "pct_change_1h": listing.pct_change_1h,
+            "pct_change_24h": listing.pct_change_24h,
+            "pct_change_7d": listing.pct_change_7d,
+            "volume_change_24h": listing.volume_change_24h,
+            "volume_24h": listing.volume_24h,
+            "market_cap": listing.market_cap,
+            "direction": (
+                "bullish" if listing.pct_change_1h > 1.0
+                else "bearish" if listing.pct_change_1h < -1.0
+                else "neutral"
+            ),
+        }
+
     def get_top_gainers(self, limit: int = 20) -> list[dict[str, Any]]:
         """Return top gainers by 24h percent change."""
         sorted_listings = sorted(

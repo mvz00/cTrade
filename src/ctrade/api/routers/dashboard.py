@@ -1,4 +1,4 @@
-"""Dashboard API endpoints — real data from paper engine and system status."""
+"""Dashboard API endpoints — real data from active engine and system status."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from ctrade.core.config_store import RuntimeConfigStore
+from ctrade.exchange.engine_resolver import get_engine
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.strategy.orchestrator import TradingOrchestrator
 
@@ -17,8 +18,8 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def get_dashboard_summary() -> dict[str, Any]:
     """Get dashboard summary with portfolio value, P&L, and active feeds."""
     try:
-        engine = PaperEngine.get_instance()
-        portfolio = engine.get_portfolio()
+        engine = get_engine()
+        portfolio = await engine.get_portfolio()
         store = RuntimeConfigStore.get()
         trading = store.get_trading()
 
@@ -26,7 +27,7 @@ async def get_dashboard_summary() -> dict[str, Any]:
             "total_value_usd": portfolio["total_value_usd"],
             "daily_pnl": portfolio["daily_pnl"],
             "open_positions": portfolio["open_positions"],
-            "active_feeds": len(engine.get_watched_pairs()),
+            "active_feeds": len(PaperEngine.get_instance().get_watched_pairs()),
             "trading_mode": trading.get("mode", "paper"),
         }
     except RuntimeError:
@@ -43,7 +44,7 @@ async def get_dashboard_summary() -> dict[str, Any]:
 async def get_equity_curve() -> list[dict[str, Any]]:
     """Get portfolio equity curve over time."""
     try:
-        engine = PaperEngine.get_instance()
+        engine = get_engine()
         return engine.get_equity_curve()
     except RuntimeError:
         return []
@@ -55,7 +56,7 @@ async def get_recent_trades(
 ) -> list[dict[str, Any]]:
     """Get recent closed trades."""
     try:
-        engine = PaperEngine.get_instance()
+        engine = get_engine()
         return engine.get_recent_trades(limit=limit)
     except RuntimeError:
         return []
@@ -65,7 +66,8 @@ async def get_recent_trades(
 async def get_system_status() -> dict[str, Any]:
     """Get system component health status."""
     try:
-        engine = PaperEngine.get_instance()
+        # Watched pairs are shared via PaperEngine
+        paper = PaperEngine.get_instance()
         orch = TradingOrchestrator.get_instance()
         store = RuntimeConfigStore.get()
         exchanges = store.list_exchanges()
@@ -101,7 +103,7 @@ async def get_system_status() -> dict[str, Any]:
                 "label": "Active" if onchain.is_enabled else "Inactive",
             },
             "event_bus": {"status": "ok", "label": "Running"},
-            "watched_pairs": len(engine.get_watched_pairs()),
+            "watched_pairs": len(paper.get_watched_pairs()),
         }
     except RuntimeError:
         return {

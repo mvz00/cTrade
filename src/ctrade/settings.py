@@ -66,8 +66,8 @@ class StrategySettings(BaseSettings):
     technical_weight: float = 0.50
     sentiment_weight: float = 0.30
     onchain_weight: float = 0.20
-    entry_confidence_threshold: float = 0.70
-    exit_confidence_threshold: float = 0.30
+    entry_confidence_threshold: float = 0.55
+    exit_confidence_threshold: float = 0.45
     rsi_period: int = 14
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
@@ -99,11 +99,31 @@ class AuthSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="CTRADE_AUTH__")
 
+    enabled: bool = False  # Set to True in production (CTRADE_AUTH__ENABLED=true)
     secret_key: SecretStr = SecretStr("change-me-in-production")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440  # 24 hours
     username: str = "admin"
     password_hash: str = ""
+
+
+class DiscordSettings(BaseSettings):
+    """Discord webhook notification settings."""
+
+    model_config = SettingsConfigDict(env_prefix="CTRADE_DISCORD__")
+
+    enabled: bool = False
+    webhook_url: SecretStr = SecretStr("")
+
+
+class TelegramSettings(BaseSettings):
+    """Telegram bot notification settings."""
+
+    model_config = SettingsConfigDict(env_prefix="CTRADE_TELEGRAM__")
+
+    enabled: bool = False
+    bot_token: SecretStr = SecretStr("")
+    chat_id: str = ""
 
 
 class AppSettings(BaseSettings):
@@ -135,6 +155,8 @@ class AppSettings(BaseSettings):
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     feeds: FeedSettings = Field(default_factory=FeedSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    discord: DiscordSettings = Field(default_factory=DiscordSettings)
+    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
 
 
 @lru_cache(maxsize=1)

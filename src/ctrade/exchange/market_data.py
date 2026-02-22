@@ -254,27 +254,53 @@ class MarketDataProvider:
 
         Returns a dict compatible with the ``PortfolioResponse`` schema,
         or ``None`` if the balance fetch fails.
+
+        Uses only real exchange tickers for pricing (never simulated fallback)
+        to avoid inflating dust balances with fake prices.
         """
         balances = await self.fetch_exchange_balance()
         if balances is None:
             return None
 
-        # Stablecoins treated as USD-equivalent
-        _STABLECOINS = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD"}
+        # Stablecoins and fiat treated as USD-equivalent
+        _CASH_CURRENCIES = {
+            "USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD",  # stablecoins
+            "USD", "EUR", "GBP", "AUD", "CAD", "JPY", "CHF",  # fiat
+        }
+        # Fiat → approximate USD conversion (good enough for portfolio display)
+        _FIAT_TO_USD: dict[str, float] = {
+            "USD": 1.0, "EUR": 1.08, "GBP": 1.27, "AUD": 0.65,
+            "CAD": 0.74, "JPY": 0.0067, "CHF": 1.13,
+        }
 
         cash_value = 0.0
         positions_value = 0.0
         non_stable_count = 0
 
         for currency, amount in balances.items():
-            if currency in _STABLECOINS:
-                cash_value += amount
+            if currency in _CASH_CURRENCIES:
+                # Stablecoins count as $1, fiat uses approximate rate
+                rate = _FIAT_TO_USD.get(currency, 1.0)
+                cash_value += amount * rate
             else:
-                # Convert to USD using ticker price
+                # Convert to USD using REAL exchange ticker only
+                # (never fall back to simulated prices for portfolio valuation)
                 symbol = f"{currency}/USDT"
                 try:
-                    ticker = await self.get_ticker(symbol)
+                    ticker = await self._try_ccxt_ticker(symbol)
+                    if ticker is None:
+                        # Try with /USD pair (common on Kraken)
+                        ticker = await self._try_ccxt_ticker(f"{currency}/USD")
+                    if ticker is None:
+                        logger.debug(
+                            "No real ticker for %s (amount=%.8f), skipping",
+                            currency, amount,
+                        )
+                        continue
                     usd_value = amount * float(ticker.last_price)
+                    # Skip dust (< $0.01)
+                    if usd_value < 0.01:
+                        continue
                     positions_value += usd_value
                     non_stable_count += 1
                 except Exception:
@@ -284,8 +310,8 @@ class MarketDataProvider:
 
         return {
             "cash_balance": balances,
-            "total_value_usd": total_value,
-            "positions_value": positions_value,
+            "total_value_usd": round(total_value, 2),
+            "positions_value": round(positions_value, 2),
             "unrealized_pnl": 0.0,
             "realized_pnl": 0.0,
             "daily_pnl": 0.0,

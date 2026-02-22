@@ -38,15 +38,39 @@ import type {
   OnChainAllScores,
   OnChainMetrics,
   OnChainFeedStatus,
+  LoginRequest,
+  TokenResponse,
+  ChangePasswordRequest,
+  ChangePasswordResponse,
 } from './types';
 
 const API_BASE = '/api/v1';
+const TOKEN_KEY = 'ctrade_token';
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+
+  // Inject Bearer token if available
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
+    headers,
   });
+
+  // On 401 from a non-login endpoint, clear token and redirect to login
+  if (res.status === 401 && !path.startsWith('/auth/login')) {
+    localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new Event('ctrade:unauthorized'));
+    throw new Error('Session expired — please log in again');
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     let msg = `API error: ${res.status} ${res.statusText}`;
@@ -66,6 +90,12 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // ---- Auth ----
+  login: (body: LoginRequest) =>
+    apiFetch<TokenResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  changePassword: (body: ChangePasswordRequest) =>
+    apiFetch<ChangePasswordResponse>('/auth/change-password', { method: 'POST', body: JSON.stringify(body) }),
+
   health: () => apiFetch<HealthResponse>('/health'),
   dashboardSummary: () => apiFetch<DashboardSummary>('/dashboard/summary'),
   systemStatus: () => apiFetch<SystemStatus>('/dashboard/status'),
@@ -105,6 +135,8 @@ export const api = {
     apiFetch<Position[]>(`/trading/positions${status ? `?status=${status}` : ''}`),
   closePosition: (id: string) =>
     apiFetch<Order>(`/trading/positions/${id}/close`, { method: 'POST' }),
+  closeAllPositions: () =>
+    apiFetch<{ closed: number; failed: number; errors: string[] }>('/trading/positions/close-all', { method: 'POST' }),
   portfolio: () => apiFetch<Portfolio>('/trading/portfolio'),
   getTicker: (symbol: string) =>
     apiFetch<Ticker>(`/trading/ticker/${encodeURIComponent(symbol)}`),
