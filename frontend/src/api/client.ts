@@ -42,6 +42,8 @@ import type {
   TokenResponse,
   ChangePasswordRequest,
   ChangePasswordResponse,
+  ConnectionsResponse,
+  ConnectionTestResult,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -201,4 +203,9 @@ export const api = {
     return apiFetch<ScreenerResponse>(`/screener/search${q ? `?${q}` : ''}`);
   },
   cmcFeedStatus: () => apiFetch<CMCFeedStatus>('/screener/status'),
+
+  // ---- Connections ----
+  connections: () => apiFetch<ConnectionsResponse>('/connections'),
+  testConnection: (name: string) =>
+    apiFetch<ConnectionTestResult>(`/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
 };

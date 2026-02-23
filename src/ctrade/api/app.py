@@ -20,6 +20,7 @@ from ctrade.api.routers import (
     auth,
     backtest,
     config,
+    connections,
     dashboard,
     exchanges,
     health,
@@ -179,6 +180,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(screener.router, prefix="/api/v1")
     app.include_router(sentiment.router, prefix="/api/v1")
     app.include_router(onchain.router, prefix="/api/v1")
+    app.include_router(connections.router, prefix="/api/v1")
 
     # WebSocket
     app.include_router(ws_router, prefix="/api/v1")

@@ -101,13 +101,10 @@ class OnChainFeed:
 
         self._enabled = True
         self._is_running = True
-        await self._fetch_all_sources()
+        # Start background polling — first fetch happens after a short delay
+        # so the server can begin accepting healthcheck requests immediately.
         self._fetch_task = asyncio.create_task(self._polling_loop())
-        logger.info(
-            "On-chain feed started (poll interval=%ds, %d metrics loaded)",
-            self._poll_interval,
-            sum(len(m) for m in self._metrics.values()),
-        )
+        logger.info("On-chain feed started (poll interval=%ds, first fetch in ~10s)", self._poll_interval)
 
     async def stop(self) -> None:
         """Stop periodic fetching."""
@@ -183,6 +180,16 @@ class OnChainFeed:
     # ---- Internal polling ----
 
     async def _polling_loop(self) -> None:
+        # Short initial delay so the server can start accepting requests first
+        try:
+            await asyncio.sleep(10)
+            if self._is_running:
+                await self._fetch_all_sources()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("On-chain feed initial fetch error")
+
         while self._is_running:
             try:
                 await asyncio.sleep(self._poll_interval)

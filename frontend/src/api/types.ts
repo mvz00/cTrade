@@ -412,3 +412,31 @@ export interface CMCFeedStatus {
   last_fetch: string | null;
   listings_count: number;
 }
+
+// ---- Connections ----
+
+export interface ConnectionInfo {
+  name: string;
+  feed_name: string;
+  base_urls: string[];
+  requires_key: boolean;
+  key_configured: boolean;
+  feed_enabled: boolean;
+  feed_healthy: boolean;
+  status: 'untested' | 'ok' | 'error' | 'disabled';
+  last_checked: string | null;
+  error_message: string | null;
+  description: string;
+}
+
+export interface ConnectionsResponse {
+  connections: ConnectionInfo[];
+}
+
+export interface ConnectionTestResult {
+  name: string;
+  success: boolean;
+  latency_ms: number;
+  message: string;
+  tested_at: string;
+}

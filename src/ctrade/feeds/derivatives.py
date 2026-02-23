@@ -129,14 +129,10 @@ class DerivativesFeed:
         # Get initial watched symbols
         self._refresh_watched_symbols()
 
-        # Fetch immediately, then start background loop
-        await self._fetch_all()
+        # Start background polling — first fetch happens after a short delay
+        # so the server can begin accepting healthcheck requests immediately.
         self._fetch_task = asyncio.create_task(self._polling_loop())
-        logger.info(
-            "Derivatives feed started (poll interval=%ds, %d symbols tracked)",
-            self._poll_interval,
-            len(self._watched_symbols),
-        )
+        logger.info("Derivatives feed started (poll interval=%ds, first fetch in ~10s)", self._poll_interval)
 
     async def stop(self) -> None:
         """Stop periodic fetching."""
@@ -351,6 +347,17 @@ class DerivativesFeed:
     # ------ Internal polling ------
 
     async def _polling_loop(self) -> None:
+        # Short initial delay so the server can start accepting requests first
+        try:
+            await asyncio.sleep(10)
+            if self._is_running:
+                self._refresh_watched_symbols()
+                await self._fetch_all()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("Derivatives feed initial fetch error")
+
         while self._is_running:
             try:
                 await asyncio.sleep(self._poll_interval)
