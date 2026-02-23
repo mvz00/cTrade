@@ -37,34 +37,36 @@ def is_db_available() -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """FastAPI lifespan: startup and shutdown logic."""
+    """FastAPI lifespan: startup and shutdown logic.
+
+    CRITICAL: This function MUST always reach ``yield`` so the server
+    accepts connections and Railway's healthcheck can succeed.  Every
+    startup step is wrapped in its own try/except to ensure that a
+    failure in one step never prevents the server from starting.
+    """
     global _event_bus, _db_available
     settings = get_settings()
+    feed_task: asyncio.Task[None] | None = None
 
-    # Use print() alongside logger for Railway deploy logs visibility
-    print("[cTrade] Starting cTrade v0.1.0...", flush=True)
-    logger.info("Starting cTrade v0.1.0...")
+    print(f"[cTrade] Starting cTrade v0.1.0 on port {settings.api_port}...", flush=True)
 
-    # Initialize runtime config store (must happen before any API calls)
-    RuntimeConfigStore.initialize(settings)
-    logger.info("Runtime config store initialized")
-    logger.info("Trading mode: %s", settings.trading.mode)
+    # --- Step 1: Config store ---
+    try:
+        RuntimeConfigStore.initialize(settings)
+        print("[cTrade] [1/6] Config store initialized", flush=True)
+    except Exception as e:
+        print(f"[cTrade] [1/6] Config store FAILED (non-fatal): {e}", flush=True)
 
-    # Initialize database (non-fatal if unavailable)
-    # Use a strict timeout so an unreachable DB never blocks startup.
+    # --- Step 2: Database ---
     try:
         from ctrade.db.engine import ping_db
 
-        print("[cTrade] Initializing database engine...", flush=True)
+        print("[cTrade] [2/6] Initializing database...", flush=True)
         init_db(
             database_url=settings.db.url,
             pool_size=settings.db.pool_size,
             echo=settings.db.echo_sql,
         )
-        # Engine created, but verify actual connectivity before proceeding.
-        # ping_db() already has an internal asyncio.wait_for timeout (10s),
-        # but we add an outer guard just in case.
-        print("[cTrade] Pinging database (10s timeout)...", flush=True)
         try:
             db_ok = await asyncio.wait_for(ping_db(timeout=10), timeout=15)
         except asyncio.TimeoutError:
@@ -72,26 +74,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         if db_ok:
             _db_available = True
-            print("[cTrade] Database connected and ready", flush=True)
-            logger.info("Database connected and ready")
+            print("[cTrade] [2/6] Database connected", flush=True)
         else:
             _db_available = False
             await close_db()
-            print("[cTrade] Database unreachable — running in memory-only mode", flush=True)
-            logger.warning(
-                "Database unreachable — running in memory-only mode. "
-                "Start PostgreSQL with: docker-compose up -d"
-            )
+            print("[cTrade] [2/6] Database unreachable — memory-only mode", flush=True)
     except Exception as e:
         _db_available = False
-        print(f"[cTrade] Database unavailable: {e}", flush=True)
-        logger.warning(
-            "Database unavailable — running without DB. "
-            "Start PostgreSQL with: docker-compose up -d  |  Error: %s",
-            e,
-        )
+        print(f"[cTrade] [2/6] Database FAILED (non-fatal): {e}", flush=True)
 
-    # Hydrate singletons from DB (non-fatal if anything goes wrong)
+    # --- Step 2b: Hydrate singletons from DB ---
     if _db_available:
         try:
             from ctrade.exchange.live_engine import LiveEngine
@@ -105,124 +97,143 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await SignalManager.get_instance().hydrate_from_db()
             await AlertManager.get_instance().hydrate_from_db()
             await TradingOrchestrator.get_instance().hydrate_from_db()
-            logger.info("All singletons hydrated from database")
+            print("[cTrade]        Singletons hydrated from DB", flush=True)
         except Exception as e:
-            logger.warning("Singleton hydration failed (non-fatal): %s", e)
+            print(f"[cTrade]        Hydration FAILED (non-fatal): {e}", flush=True)
 
-    # Start event bus (singleton — accessible via EventBus.get_instance())
-    _event_bus = EventBus.get_instance()
-    await _event_bus.start()
-    app.state.event_bus = _event_bus
-    logger.info("Event bus started")
+    # --- Step 3: Event bus ---
+    try:
+        _event_bus = EventBus.get_instance()
+        await _event_bus.start()
+        app.state.event_bus = _event_bus
+        print("[cTrade] [3/6] Event bus started", flush=True)
+    except Exception as e:
+        print(f"[cTrade] [3/6] Event bus FAILED (non-fatal): {e}", flush=True)
 
-    # Wire WebSocket event forwarder
-    from ctrade.api.websocket import register_event_forwarder
-    register_event_forwarder(_event_bus)
+    # --- Step 4: WebSocket forwarder ---
+    try:
+        from ctrade.api.websocket import register_event_forwarder
+        if _event_bus:
+            register_event_forwarder(_event_bus)
+        print("[cTrade] [4/6] WebSocket forwarder ready", flush=True)
+    except Exception as e:
+        print(f"[cTrade] [4/6] WebSocket forwarder FAILED (non-fatal): {e}", flush=True)
 
-    print("[cTrade] Core services ready — starting server...", flush=True)
+    # --- Step 5: Data feeds ---
+    try:
+        if settings.feeds_enabled:
+            from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+            from ctrade.feeds.cvd import CVDFeed
+            from ctrade.feeds.derivatives import DerivativesFeed
+            from ctrade.feeds.market_sentiment import MarketSentimentFeed
+            from ctrade.feeds.onchain import OnChainFeed
+            from ctrade.feeds.sentiment import SentimentFeed
+            from ctrade.feeds.social_velocity import SocialVelocityFeed
 
-    # Start data feeds in background (skipped when CTRADE_FEEDS_ENABLED=false)
-    feed_task: asyncio.Task[None] | None = None
-    if settings.feeds_enabled:
-        from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
-        from ctrade.feeds.cvd import CVDFeed
-        from ctrade.feeds.derivatives import DerivativesFeed
-        from ctrade.feeds.market_sentiment import MarketSentimentFeed
-        from ctrade.feeds.onchain import OnChainFeed
-        from ctrade.feeds.sentiment import SentimentFeed
-        from ctrade.feeds.social_velocity import SocialVelocityFeed
+            async def _start_feeds() -> None:
+                """Start all data feeds with staggered delays."""
+                feeds = [
+                    CoinMarketCapFeed.get_instance(),
+                    SentimentFeed.get_instance(),
+                    OnChainFeed.get_instance(),
+                    DerivativesFeed.get_instance(),
+                    MarketSentimentFeed.get_instance(),
+                    CVDFeed.get_instance(),
+                    SocialVelocityFeed.get_instance(),
+                ]
+                for i, feed in enumerate(feeds):
+                    try:
+                        await feed.start()
+                    except Exception as e:
+                        logger.warning("Feed %s failed to start: %s", feed.name, e)
+                    if i < len(feeds) - 1:
+                        await asyncio.sleep(5)
+                logger.info("All data feeds started")
 
-        async def _start_feeds() -> None:
-            """Start all data feeds with staggered delays to avoid request burst."""
-            feeds = [
-                CoinMarketCapFeed.get_instance(),
-                SentimentFeed.get_instance(),
-                OnChainFeed.get_instance(),
-                DerivativesFeed.get_instance(),
-                MarketSentimentFeed.get_instance(),
-                CVDFeed.get_instance(),
-                SocialVelocityFeed.get_instance(),
-            ]
-            for i, feed in enumerate(feeds):
-                try:
-                    await feed.start()
-                except Exception as e:
-                    logger.warning("Feed %s failed to start (non-fatal): %s", feed.name, e)
-                # Stagger feed starts by 5s each so first-fetches don't all
-                # fire at T+10s (each feed has its own 10s internal delay).
-                if i < len(feeds) - 1:
-                    await asyncio.sleep(5)
-            logger.info("All data feeds started")
+            feed_task = asyncio.create_task(_start_feeds())
+            print("[cTrade] [5/6] Feeds starting (background task)", flush=True)
+        else:
+            print("[cTrade] [5/6] Feeds disabled (CTRADE_FEEDS_ENABLED=false)", flush=True)
+    except Exception as e:
+        print(f"[cTrade] [5/6] Feeds FAILED (non-fatal): {e}", flush=True)
 
-        feed_task = asyncio.create_task(_start_feeds())
-    else:
-        print("[cTrade] Data feeds disabled (CTRADE_FEEDS_ENABLED=false)", flush=True)
-        logger.info("Data feeds disabled via CTRADE_FEEDS_ENABLED=false")
+    # --- Step 6: Notification channels ---
+    try:
+        from ctrade.notifications.channels.router import NotificationRouter
+        notification_router = NotificationRouter.get_instance()
 
-    # Register notification channels (optional — only when env vars are set)
-    from ctrade.notifications.channels.router import NotificationRouter
-    notification_router = NotificationRouter.get_instance()
-
-    if settings.discord.enabled and settings.discord.webhook_url.get_secret_value():
-        from ctrade.notifications.channels.discord import DiscordChannel
-        notification_router.register(
-            DiscordChannel(settings.discord.webhook_url.get_secret_value())
-        )
-
-    if settings.telegram.enabled and settings.telegram.bot_token.get_secret_value():
-        from ctrade.notifications.channels.telegram import TelegramChannel
-        notification_router.register(
-            TelegramChannel(
-                settings.telegram.bot_token.get_secret_value(),
-                settings.telegram.chat_id,
+        if settings.discord.enabled and settings.discord.webhook_url.get_secret_value():
+            from ctrade.notifications.channels.discord import DiscordChannel
+            notification_router.register(
+                DiscordChannel(settings.discord.webhook_url.get_secret_value())
             )
-        )
 
-    if notification_router.list_channels():
-        logger.info("Notification channels active: %s", ", ".join(notification_router.list_channels()))
+        if settings.telegram.enabled and settings.telegram.bot_token.get_secret_value():
+            from ctrade.notifications.channels.telegram import TelegramChannel
+            notification_router.register(
+                TelegramChannel(
+                    settings.telegram.bot_token.get_secret_value(),
+                    settings.telegram.chat_id,
+                )
+            )
 
-    print(f"[cTrade] Startup complete — listening on {settings.api_host}:{settings.api_port}", flush=True)
-    logger.info("cTrade startup complete — visit http://%s:%d", settings.api_host, settings.api_port)
+        channels = notification_router.list_channels()
+        if channels:
+            print(f"[cTrade] [6/6] Notifications: {', '.join(channels)}", flush=True)
+        else:
+            print("[cTrade] [6/6] No notification channels configured", flush=True)
+    except Exception as e:
+        print(f"[cTrade] [6/6] Notifications FAILED (non-fatal): {e}", flush=True)
 
-    yield  # App is running
+    # === SERVER READY — this yield MUST always be reached ===
+    print(f"[cTrade] === SERVER READY on 0.0.0.0:{settings.api_port} ===", flush=True)
 
-    # --- Shutdown ---
-    logger.info("Shutting down cTrade...")
+    yield  # App is running — healthcheck can now respond
 
-    # Cancel feed startup if still running, then stop all feeds
-    if feed_task is not None:
-        if not feed_task.done():
-            feed_task.cancel()
-            try:
-                await feed_task
-            except asyncio.CancelledError:
-                pass
+    # --- Shutdown (also crash-proof) ---
+    print("[cTrade] Shutting down...", flush=True)
+    try:
+        if feed_task is not None:
+            if not feed_task.done():
+                feed_task.cancel()
+                try:
+                    await feed_task
+                except asyncio.CancelledError:
+                    pass
 
-        from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
-        from ctrade.feeds.cvd import CVDFeed
-        from ctrade.feeds.derivatives import DerivativesFeed
-        from ctrade.feeds.market_sentiment import MarketSentimentFeed
-        from ctrade.feeds.onchain import OnChainFeed
-        from ctrade.feeds.sentiment import SentimentFeed
-        from ctrade.feeds.social_velocity import SocialVelocityFeed
+            from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+            from ctrade.feeds.cvd import CVDFeed
+            from ctrade.feeds.derivatives import DerivativesFeed
+            from ctrade.feeds.market_sentiment import MarketSentimentFeed
+            from ctrade.feeds.onchain import OnChainFeed
+            from ctrade.feeds.sentiment import SentimentFeed
+            from ctrade.feeds.social_velocity import SocialVelocityFeed
 
-        await SocialVelocityFeed.get_instance().stop()
-        await CVDFeed.get_instance().stop()
-        await MarketSentimentFeed.get_instance().stop()
-        await DerivativesFeed.get_instance().stop()
-        await OnChainFeed.get_instance().stop()
-        await SentimentFeed.get_instance().stop()
-        await CoinMarketCapFeed.get_instance().stop()
+            await SocialVelocityFeed.get_instance().stop()
+            await CVDFeed.get_instance().stop()
+            await MarketSentimentFeed.get_instance().stop()
+            await DerivativesFeed.get_instance().stop()
+            await OnChainFeed.get_instance().stop()
+            await SentimentFeed.get_instance().stop()
+            await CoinMarketCapFeed.get_instance().stop()
+    except Exception as e:
+        print(f"[cTrade] Feed shutdown error: {e}", flush=True)
 
-    if _event_bus:
-        await _event_bus.stop()
+    try:
+        if _event_bus:
+            await _event_bus.stop()
+    except Exception as e:
+        print(f"[cTrade] Event bus shutdown error: {e}", flush=True)
 
-    if _db_available:
-        await close_db()
+    try:
+        if _db_available:
+            await close_db()
+    except Exception as e:
+        print(f"[cTrade] DB shutdown error: {e}", flush=True)
 
     _event_bus = None
     _db_available = False
-    logger.info("cTrade shutdown complete")
+    print("[cTrade] Shutdown complete", flush=True)
 
 
 def create_configured_app() -> FastAPI:

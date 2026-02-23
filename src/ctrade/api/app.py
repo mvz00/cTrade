@@ -48,33 +48,39 @@ _FRONTEND_DIR = (
 
 @asynccontextmanager
 async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Default lifespan that initializes the config store.
+    """Default lifespan — crash-proof so yield is ALWAYS reached.
 
     Used when create_app() is called directly (e.g. uvicorn ctrade.api.app:create_app --factory)
     without going through main.py.
     """
-    from ctrade.core.config_store import RuntimeConfigStore
-    from ctrade.core.events import EventBus
     from ctrade.settings import get_settings
 
     settings = get_settings()
-
-    # Only initialize if not already done (main.py may have already called this)
-    if not RuntimeConfigStore.is_initialized():
-        RuntimeConfigStore.initialize(settings)
-        logger.info("Runtime config store initialized (default lifespan)")
-
-    # Start event bus (singleton)
-    event_bus = EventBus.get_instance()
-    await event_bus.start()
-    app.state.event_bus = event_bus
-
-    # Wire WebSocket event forwarder
-    from ctrade.api.websocket import register_event_forwarder
-    register_event_forwarder(event_bus)
-
-    # Initialize database (non-fatal)
+    event_bus = None
     db_available = False
+
+    try:
+        from ctrade.core.config_store import RuntimeConfigStore
+        if not RuntimeConfigStore.is_initialized():
+            RuntimeConfigStore.initialize(settings)
+    except Exception as e:
+        logger.warning("Config store init failed (non-fatal): %s", e)
+
+    try:
+        from ctrade.core.events import EventBus
+        event_bus = EventBus.get_instance()
+        await event_bus.start()
+        app.state.event_bus = event_bus
+    except Exception as e:
+        logger.warning("Event bus failed (non-fatal): %s", e)
+
+    try:
+        from ctrade.api.websocket import register_event_forwarder
+        if event_bus:
+            register_event_forwarder(event_bus)
+    except Exception as e:
+        logger.warning("WebSocket forwarder failed (non-fatal): %s", e)
+
     try:
         from ctrade.db.engine import close_db, init_db, ping_db
         init_db(
@@ -82,7 +88,6 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             pool_size=settings.db.pool_size,
             echo=settings.db.echo_sql,
         )
-        # Engine created, but verify actual connectivity with a strict timeout
         try:
             db_ok = await asyncio.wait_for(ping_db(timeout=10), timeout=15)
         except asyncio.TimeoutError:
@@ -90,17 +95,11 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         if db_ok:
             db_available = True
-            logger.info("Database connected and ready")
         else:
             await close_db()
-            logger.warning(
-                "Database unreachable — running in memory-only mode. "
-                "Start PostgreSQL with: docker-compose up -d"
-            )
     except Exception:
         logger.warning("Database unavailable in default lifespan (non-fatal)")
 
-    # Hydrate singletons from DB
     if db_available:
         try:
             from ctrade.exchange.live_engine import LiveEngine
@@ -114,38 +113,44 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await SignalManager.get_instance().hydrate_from_db()
             await AlertManager.get_instance().hydrate_from_db()
             await TradingOrchestrator.get_instance().hydrate_from_db()
-            logger.info("All singletons hydrated from database")
         except Exception as e:
             logger.warning("Singleton hydration failed (non-fatal): %s", e)
 
-    # Start data feeds (each is no-op if preconditions not met)
-    from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
-    from ctrade.feeds.onchain import OnChainFeed
-    from ctrade.feeds.sentiment import SentimentFeed
+    try:
+        from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+        from ctrade.feeds.onchain import OnChainFeed
+        from ctrade.feeds.sentiment import SentimentFeed
 
-    cmc_feed = CoinMarketCapFeed.get_instance()
-    await cmc_feed.start()
+        await CoinMarketCapFeed.get_instance().start()
+        await SentimentFeed.get_instance().start()
+        await OnChainFeed.get_instance().start()
+    except Exception as e:
+        logger.warning("Feed startup failed (non-fatal): %s", e)
 
-    sentiment_feed = SentimentFeed.get_instance()
-    await sentiment_feed.start()
+    logger.info("cTrade ready (default lifespan)")
 
-    onchain_feed = OnChainFeed.get_instance()
-    await onchain_feed.start()
+    yield  # ALWAYS reached
 
-    logger.info("cTrade ready — visit http://%s:%d", settings.api_host, settings.api_port)
-
-    yield
-
-    await onchain_feed.stop()
-    await sentiment_feed.stop()
-    await cmc_feed.stop()
-    await event_bus.stop()
-    if db_available:
-        try:
+    try:
+        from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+        from ctrade.feeds.onchain import OnChainFeed
+        from ctrade.feeds.sentiment import SentimentFeed
+        await OnChainFeed.get_instance().stop()
+        await SentimentFeed.get_instance().stop()
+        await CoinMarketCapFeed.get_instance().stop()
+    except Exception:
+        pass
+    try:
+        if event_bus:
+            await event_bus.stop()
+    except Exception:
+        pass
+    try:
+        if db_available:
+            from ctrade.db.engine import close_db
             await close_db()
-        except Exception:
-            pass
-    logger.info("cTrade shutdown complete")
+    except Exception:
+        pass
 
 
 def create_app(lifespan: Any = None) -> FastAPI:
