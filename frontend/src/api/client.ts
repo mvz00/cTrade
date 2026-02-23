@@ -11,6 +11,7 @@ import type {
   RiskConfigUpdate,
   ExchangeInfo,
   ExchangeAddRequest,
+  ExchangeUpdateRequest,
   ExchangeTestResult,
   AvailableExchange,
   TradingPair,
@@ -119,6 +120,8 @@ export const api = {
   availableExchanges: () => apiFetch<AvailableExchange[]>('/exchanges/available'),
   addExchange: (body: ExchangeAddRequest) =>
     apiFetch<ExchangeInfo>('/exchanges/', { method: 'POST', body: JSON.stringify(body) }),
+  updateExchange: (id: string, body: ExchangeUpdateRequest) =>
+    apiFetch<ExchangeInfo>(`/exchanges/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteExchange: (id: string) => apiFetch<void>(`/exchanges/${id}`, { method: 'DELETE' }),
   testExchange: (id: string) => apiFetch<ExchangeTestResult>(`/exchanges/${id}/test`, { method: 'POST' }),
 

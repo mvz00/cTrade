@@ -40,7 +40,7 @@ async def login(
                 detail="Invalid username or password",
             )
 
-        # Validate password (skip if no password_hash configured)
+        # Validate password
         if auth.password_hash:
             from ctrade.security.auth import verify_password
 
@@ -50,10 +50,19 @@ async def login(
                     detail="Invalid username or password",
                 )
         else:
-            logger.warning(
-                "No password_hash configured — accepting any password for '%s'. "
-                "Set CTRADE_AUTH__PASSWORD_HASH in .env for production.",
+            # SECURITY: When auth is enabled but no password_hash is set,
+            # reject login instead of silently accepting any password.
+            logger.error(
+                "Auth is enabled but no password_hash configured for '%s'. "
+                "Login rejected. Set CTRADE_AUTH__PASSWORD_HASH (double underscore).",
                 auth.username,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Authentication is enabled but no password is configured. "
+                    "Set CTRADE_AUTH__PASSWORD_HASH env var (note: double underscore)."
+                ),
             )
 
     from ctrade.security.auth import create_access_token

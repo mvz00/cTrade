@@ -405,6 +405,34 @@ class RuntimeConfigStore:
         self._save_to_disk()
         return result
 
+    def update_exchange(
+        self,
+        exchange_id: str,
+        vault: Vault,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        passphrase: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Update credentials for an existing exchange.
+
+        Only non-None, non-empty fields are re-encrypted and updated.
+        Returns the public dict on success, or None if not found.
+        """
+        with self._data_lock:
+            entry = next((e for e in self._exchanges if e.id == exchange_id), None)
+            if entry is None:
+                return None
+            if api_key:
+                entry.api_key_encrypted = vault.encrypt(api_key)
+            if api_secret:
+                entry.api_secret_encrypted = vault.encrypt(api_secret)
+            if passphrase is not None:
+                # Allow clearing passphrase with empty string
+                entry.passphrase_encrypted = vault.encrypt(passphrase) if passphrase else None
+            result = entry.to_public_dict()
+        self._save_to_disk()
+        return result
+
     def get_exchange_entry(self, exchange_id: str) -> ExchangeEntry | None:
         with self._data_lock:
             for ex in self._exchanges:

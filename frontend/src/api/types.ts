@@ -293,6 +293,12 @@ export interface ExchangeAddRequest {
   passphrase?: string;
 }
 
+export interface ExchangeUpdateRequest {
+  api_key?: string;
+  api_secret?: string;
+  passphrase?: string;
+}
+
 export interface ExchangeInfo {
   id: string;
   name: string;
