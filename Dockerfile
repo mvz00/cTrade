@@ -45,8 +45,8 @@ COPY pyproject.toml alembic.ini ./
 COPY alembic/ alembic/
 COPY config/ config/
 
-# Full install (editable so ctrade package is importable)
-RUN pip install --no-cache-dir -e .
+# Full install (non-editable — required for multi-stage copy to work)
+RUN pip install --no-cache-dir .
 
 # --------------- Stage 2: Runtime ---------------
 FROM python:3.13-slim AS runtime
@@ -56,6 +56,7 @@ WORKDIR /app
 # Runtime system deps only
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
+        libgomp1 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 

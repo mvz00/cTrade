@@ -221,18 +221,23 @@ def main() -> None:
     host = settings.api_host
     port = settings.api_port
 
-    if not _check_port_available(host, port):
-        print(
-            f"\n  ERROR: Port {port} is already in use.\n"
-            f"\n"
-            f"  Another cTrade instance (or another app) is already running on {host}:{port}.\n"
-            f"\n"
-            f"  To fix this, either:\n"
-            f"    1. Stop the other process:  taskkill /F /PID <pid>\n"
-            f"       (find the PID with:  netstat -ano | findstr :{port})\n"
-            f"    2. Use a different port:  set CTRADE_API_PORT=8001\n"
-        )
-        raise SystemExit(1)
+    # Skip port check in container environments (Railway sets PORT env var;
+    # the check can false-positive in some container runtimes).
+    import os
+
+    if not os.environ.get("PORT"):
+        if not _check_port_available(host, port):
+            print(
+                f"\n  ERROR: Port {port} is already in use.\n"
+                f"\n"
+                f"  Another cTrade instance (or another app) is already running on {host}:{port}.\n"
+                f"\n"
+                f"  To fix this, either:\n"
+                f"    1. Stop the other process:  taskkill /F /PID <pid>\n"
+                f"       (find the PID with:  netstat -ano | findstr :{port})\n"
+                f"    2. Use a different port:  set CTRADE_API_PORT=8001\n"
+            )
+            raise SystemExit(1)
 
     app = create_configured_app()
 
