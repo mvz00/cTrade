@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -31,8 +32,16 @@ from ctrade.api.websocket import router as ws_router
 
 logger = logging.getLogger(__name__)
 
-# Path to the React build output
-_FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+# Path to the React build output.
+# In Docker (non-editable install), __file__ is in site-packages so the
+# relative parents[3] trick won't reach /app.  Use CTRADE_FRONTEND_DIR
+# env var when set (Dockerfile sets it to /app/frontend/dist).
+_frontend_env = os.environ.get("CTRADE_FRONTEND_DIR")
+_FRONTEND_DIR = (
+    Path(_frontend_env)
+    if _frontend_env
+    else Path(__file__).resolve().parents[3] / "frontend" / "dist"
+)
 
 
 @asynccontextmanager

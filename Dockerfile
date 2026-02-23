@@ -80,6 +80,10 @@ ENV CTRADE_API_HOST=0.0.0.0
 # Default port for local docker run (Railway overrides via $PORT at runtime)
 ENV CTRADE_API_PORT=8000
 
+# Tell app.py where the built frontend lives (non-editable install means
+# __file__-based path resolution won't reach /app from site-packages)
+ENV CTRADE_FRONTEND_DIR=/app/frontend/dist
+
 EXPOSE 8000
 
 # Health check
