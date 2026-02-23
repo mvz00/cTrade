@@ -90,5 +90,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${CTRADE_API_PORT}/api/v1/health || exit 1
 
-# At runtime, map Railway's $PORT to our env var, then start the app
-CMD sh -c "CTRADE_API_PORT=\${PORT:-\$CTRADE_API_PORT} exec python -m ctrade.main"
+# Start the app (Railway's $PORT is read directly by settings.py)
+CMD ["python", "-m", "ctrade.main"]
