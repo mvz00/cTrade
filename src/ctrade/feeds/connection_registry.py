@@ -27,6 +27,16 @@ _TEST_TIMEOUT = 10.0  # seconds
 
 
 @dataclass
+class CredentialFieldDef:
+    """Definition of a single credential field for a connection."""
+
+    key: str            # e.g. "api_key"
+    label: str          # e.g. "API Key"
+    env_var: str        # e.g. "CTRADE_FEEDS__COINMARKETCAP_API_KEY"
+    is_secret: bool = True
+
+
+@dataclass
 class ConnectionDef:
     """Static definition of an external API connection."""
 
@@ -36,6 +46,7 @@ class ConnectionDef:
     requires_key: bool
     key_env_var: str
     description: str
+    credential_fields: list[CredentialFieldDef] = field(default_factory=list)
 
 
 @dataclass
@@ -53,6 +64,7 @@ class ConnectionStatus:
     last_checked: str | None
     error_message: str | None
     description: str
+    credential_fields: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +79,7 @@ class ConnectionStatus:
             "last_checked": self.last_checked,
             "error_message": self.error_message,
             "description": self.description,
+            "credential_fields": self.credential_fields,
         }
 
 
@@ -102,6 +115,13 @@ _CONNECTIONS: list[ConnectionDef] = [
         requires_key=True,
         key_env_var="CTRADE_FEEDS__COINMARKETCAP_API_KEY",
         description="Market cap listings and momentum scores",
+        credential_fields=[
+            CredentialFieldDef(
+                key="api_key",
+                label="API Key",
+                env_var="CTRADE_FEEDS__COINMARKETCAP_API_KEY",
+            ),
+        ],
     ),
     ConnectionDef(
         name="CryptoCompare",
@@ -162,6 +182,11 @@ _CONNECTIONS: list[ConnectionDef] = [
 ]
 
 
+def get_connection_def(name: str) -> ConnectionDef | None:
+    """Look up a connection definition by name."""
+    return next((c for c in _CONNECTIONS if c.name == name), None)
+
+
 # ---------------------------------------------------------------------------
 # Status retrieval (reads cached feed state — no external calls)
 # ---------------------------------------------------------------------------
@@ -194,7 +219,7 @@ def get_all_connection_statuses() -> list[ConnectionStatus]:
                     key_configured = False
             elif conn.key_env_var:
                 key_configured = bool(
-                    _get_secret_value(settings, conn.key_env_var)
+                    _get_secret_value(settings, conn.key_env_var, connection_name=conn.name)
                 )
 
         fi = feed_info.get(conn.feed_name)
@@ -227,6 +252,10 @@ def get_all_connection_statuses() -> list[ConnectionStatus]:
                 last_checked=last_checked,
                 error_message=None,
                 description=conn.description,
+                credential_fields=[
+                    {"key": f.key, "label": f.label, "is_secret": f.is_secret}
+                    for f in conn.credential_fields
+                ],
             )
         )
 
@@ -273,8 +302,31 @@ def _get_feed_info() -> dict[str, dict[str, Any]]:
     return info
 
 
-def _get_secret_value(settings: Any, env_var: str) -> str:
-    """Resolve a CTRADE_FEEDS__* env var to its value via settings."""
+def _get_secret_value(settings: Any, env_var: str, connection_name: str = "") -> str:
+    """Resolve a credential: RuntimeConfigStore first, then env var fallback.
+
+    Priority:
+    1. RuntimeConfigStore (UI-configured via Connections page)
+    2. Environment variable (via FeedSettings)
+    """
+    # 1. Check RuntimeConfigStore first (UI-configured credentials)
+    if connection_name:
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+
+            store = RuntimeConfigStore.get()
+            enc = store.get_feed_credential(connection_name, "api_key")
+            if enc is not None:
+                from ctrade.security.vault import Vault
+
+                enc_key = settings.encryption_key.get_secret_value()
+                if enc_key:
+                    vault = Vault(enc_key)
+                    return vault.decrypt(enc)
+        except (RuntimeError, Exception):
+            pass  # Store not initialized or decryption failed — fall through
+
+    # 2. Fall back to env var resolution
     # env_var like "CTRADE_FEEDS__COINMARKETCAP_API_KEY" → settings.feeds.coinmarketcap_api_key
     key = env_var.replace("CTRADE_FEEDS__", "").lower()
     feeds = settings.feeds
@@ -327,7 +379,11 @@ async def test_connection(name: str) -> ConnectionTestResult:
     headers: dict[str, str] = {"Accept": "application/json"}
     if name == "CoinMarketCap":
         from ctrade.settings import get_settings
-        api_key = get_settings().feeds.coinmarketcap_api_key.get_secret_value()
+
+        settings = get_settings()
+        api_key = _get_secret_value(
+            settings, "CTRADE_FEEDS__COINMARKETCAP_API_KEY", connection_name="CoinMarketCap"
+        )
         if not api_key:
             return ConnectionTestResult(
                 name=name,

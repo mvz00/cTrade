@@ -110,7 +110,28 @@ class CoinMarketCapFeed:
         from ctrade.settings import get_settings
 
         settings = get_settings()
-        api_key = settings.feeds.coinmarketcap_api_key.get_secret_value()
+
+        # Check RuntimeConfigStore first (UI-configured via Connections page),
+        # then fall back to environment variable.
+        api_key = ""
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+
+            store = RuntimeConfigStore.get()
+            enc = store.get_feed_credential("CoinMarketCap", "api_key")
+            if enc is not None:
+                from ctrade.security.vault import Vault
+
+                enc_key = settings.encryption_key.get_secret_value()
+                if enc_key:
+                    vault = Vault(enc_key)
+                    api_key = vault.decrypt(enc)
+        except (RuntimeError, Exception):
+            pass  # Store not initialized or decryption failed
+
+        if not api_key:
+            api_key = settings.feeds.coinmarketcap_api_key.get_secret_value()
+
         if not api_key:
             logger.info("CMC feed disabled — no API key configured")
             self._enabled = False
