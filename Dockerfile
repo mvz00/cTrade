@@ -76,16 +76,14 @@ COPY --from=builder /app/frontend/dist /app/frontend/dist
 # Bind to all interfaces (required for Railway / container networking)
 ENV CTRADE_API_HOST=0.0.0.0
 
-# Railway injects PORT; map it to our setting.
-# Default to 8000 for local docker run.
-ENV CTRADE_API_PORT=${PORT:-8000}
+# Default port for local docker run (Railway overrides via $PORT at runtime)
+ENV CTRADE_API_PORT=8000
 
-# Expose the port (documentation; Railway uses PORT)
 EXPOSE 8000
 
-# Health check (Railway also uses /api/v1/health)
+# Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:${CTRADE_API_PORT:-8000}/api/v1/health || exit 1
+    CMD curl -f http://localhost:${CTRADE_API_PORT}/api/v1/health || exit 1
 
-# Run the application
-CMD ["python", "-m", "ctrade.main"]
+# At runtime, map Railway's $PORT to our env var, then start the app
+CMD sh -c "CTRADE_API_PORT=\${PORT:-\$CTRADE_API_PORT} exec python -m ctrade.main"
