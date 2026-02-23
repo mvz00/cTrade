@@ -144,6 +144,14 @@ class AppSettings(BaseSettings):
     api_port: int = 8000
     feeds_enabled: bool = True  # Set CTRADE_FEEDS_ENABLED=false for lean deployments
 
+    @field_validator("api_host", mode="before")
+    @classmethod
+    def _force_bind_all_in_container(cls, v: Any) -> Any:
+        """In container environments (Railway), always bind to 0.0.0.0."""
+        if os.environ.get("PORT"):
+            return "0.0.0.0"
+        return v
+
     @field_validator("api_port", mode="before")
     @classmethod
     def _use_railway_port(cls, v: Any) -> Any:
