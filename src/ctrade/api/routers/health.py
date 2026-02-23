@@ -1,4 +1,10 @@
-"""Health check endpoint with database status."""
+"""Health check endpoint with database status.
+
+The /health endpoint is used by Railway (and Docker HEALTHCHECK) to determine
+whether the container is alive.  It MUST respond quickly and NEVER block on
+external services (database, Redis, etc.).  We report cached DB status instead
+of pinging the database on every health-check request.
+"""
 
 from __future__ import annotations
 
@@ -12,10 +18,16 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check() -> dict[str, Any]:
-    """Health check endpoint with database connectivity status."""
-    from ctrade.db.engine import ping_db
+    """Health check endpoint — always returns 200 immediately.
 
-    db_ok = await ping_db()
+    Uses the cached DB availability flag from the main lifespan instead of
+    calling ping_db() which can hang if the database is unreachable.
+    """
+    try:
+        from ctrade.main import is_db_available
+        db_ok = is_db_available()
+    except Exception:
+        db_ok = False
 
     return {
         "status": "ok",

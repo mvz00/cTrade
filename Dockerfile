@@ -84,6 +84,9 @@ ENV CTRADE_API_PORT=8000
 # __file__-based path resolution won't reach /app from site-packages)
 ENV CTRADE_FRONTEND_DIR=/app/frontend/dist
 
+# Ensure Python output is sent straight to Railway logs (no buffering)
+ENV PYTHONUNBUFFERED=1
+
 EXPOSE 8000
 
 # Health check

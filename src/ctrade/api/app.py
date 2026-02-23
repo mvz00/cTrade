@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator
@@ -80,8 +81,13 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             pool_size=settings.db.pool_size,
             echo=settings.db.echo_sql,
         )
-        # Engine created, but verify actual connectivity before proceeding
-        if await ping_db():
+        # Engine created, but verify actual connectivity with a strict timeout
+        try:
+            db_ok = await asyncio.wait_for(ping_db(timeout=10), timeout=15)
+        except asyncio.TimeoutError:
+            db_ok = False
+
+        if db_ok:
             db_available = True
             logger.info("Database connected and ready")
         else:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
+import traceback
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -39,6 +41,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _event_bus, _db_available
     settings = get_settings()
 
+    # Use print() alongside logger for Railway deploy logs visibility
+    print("[cTrade] Starting cTrade v0.1.0...", flush=True)
     logger.info("Starting cTrade v0.1.0...")
 
     # Initialize runtime config store (must happen before any API calls)
@@ -47,27 +51,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Trading mode: %s", settings.trading.mode)
 
     # Initialize database (non-fatal if unavailable)
+    # Use a strict timeout so an unreachable DB never blocks startup.
     try:
         from ctrade.db.engine import ping_db
 
+        print("[cTrade] Initializing database engine...", flush=True)
         init_db(
             database_url=settings.db.url,
             pool_size=settings.db.pool_size,
             echo=settings.db.echo_sql,
         )
-        # Engine created, but verify actual connectivity before proceeding
-        if await ping_db():
+        # Engine created, but verify actual connectivity before proceeding.
+        # ping_db() already has an internal asyncio.wait_for timeout (10s),
+        # but we add an outer guard just in case.
+        print("[cTrade] Pinging database (10s timeout)...", flush=True)
+        try:
+            db_ok = await asyncio.wait_for(ping_db(timeout=10), timeout=15)
+        except asyncio.TimeoutError:
+            db_ok = False
+
+        if db_ok:
             _db_available = True
+            print("[cTrade] Database connected and ready", flush=True)
             logger.info("Database connected and ready")
         else:
             _db_available = False
             await close_db()
+            print("[cTrade] Database unreachable — running in memory-only mode", flush=True)
             logger.warning(
                 "Database unreachable — running in memory-only mode. "
                 "Start PostgreSQL with: docker-compose up -d"
             )
     except Exception as e:
         _db_available = False
+        print(f"[cTrade] Database unavailable: {e}", flush=True)
         logger.warning(
             "Database unavailable — running without DB. "
             "Start PostgreSQL with: docker-compose up -d  |  Error: %s",
@@ -101,6 +118,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Wire WebSocket event forwarder
     from ctrade.api.websocket import register_event_forwarder
     register_event_forwarder(_event_bus)
+
+    print("[cTrade] Core services ready — starting server...", flush=True)
 
     # Start data feeds in background so the server can begin accepting
     # requests immediately (feeds fetch from external APIs on start which
@@ -155,6 +174,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if notification_router.list_channels():
         logger.info("Notification channels active: %s", ", ".join(notification_router.list_channels()))
 
+    print(f"[cTrade] Startup complete — listening on {settings.api_host}:{settings.api_port}", flush=True)
     logger.info("cTrade startup complete — visit http://%s:%d", settings.api_host, settings.api_port)
 
     yield  # App is running
@@ -211,7 +231,15 @@ def _check_port_available(host: str, port: int) -> bool:
 
 def main() -> None:
     """Entry point for the application."""
-    settings = get_settings()
+    # Ensure stdout is unbuffered so Railway sees logs immediately
+    print("[cTrade] Process starting...", flush=True)
+
+    try:
+        settings = get_settings()
+    except Exception as e:
+        print(f"[cTrade] FATAL: Failed to load settings: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)
 
     setup_logging(
         log_level=settings.log_level,
@@ -220,6 +248,8 @@ def main() -> None:
 
     host = settings.api_host
     port = settings.api_port
+
+    print(f"[cTrade] Configured: host={host}, port={port}", flush=True)
 
     # Skip port check in container environments (Railway sets PORT env var;
     # the check can false-positive in some container runtimes).
@@ -239,7 +269,14 @@ def main() -> None:
             )
             raise SystemExit(1)
 
-    app = create_configured_app()
+    try:
+        app = create_configured_app()
+    except Exception as e:
+        print(f"[cTrade] FATAL: Failed to create app: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)
+
+    print(f"[cTrade] Starting uvicorn on {host}:{port}...", flush=True)
 
     uvicorn.run(
         app,
