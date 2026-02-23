@@ -44,6 +44,7 @@ import type {
   ChangePasswordResponse,
   ConnectionsResponse,
   ConnectionTestResult,
+  ConnectionCredentialsRequest,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -208,4 +209,9 @@ export const api = {
   connections: () => apiFetch<ConnectionsResponse>('/connections'),
   testConnection: (name: string) =>
     apiFetch<ConnectionTestResult>(`/connections/${encodeURIComponent(name)}/test`, { method: 'POST' }),
+  updateConnectionCredentials: (name: string, body: ConnectionCredentialsRequest) =>
+    apiFetch<{ message: string }>(`/connections/${encodeURIComponent(name)}/credentials`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 };

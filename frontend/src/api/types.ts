@@ -415,6 +415,12 @@ export interface CMCFeedStatus {
 
 // ---- Connections ----
 
+export interface CredentialFieldDef {
+  key: string;
+  label: string;
+  is_secret: boolean;
+}
+
 export interface ConnectionInfo {
   name: string;
   feed_name: string;
@@ -427,6 +433,7 @@ export interface ConnectionInfo {
   last_checked: string | null;
   error_message: string | null;
   description: string;
+  credential_fields: CredentialFieldDef[];
 }
 
 export interface ConnectionsResponse {
@@ -439,4 +446,8 @@ export interface ConnectionTestResult {
   latency_ms: number;
   message: string;
   tested_at: string;
+}
+
+export interface ConnectionCredentialsRequest {
+  credentials: Record<string, string>;
 }

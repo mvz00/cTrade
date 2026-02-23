@@ -89,6 +89,7 @@ class RuntimeConfigStore:
             "default_take_profit_pct": settings.risk.default_take_profit_pct,
         }
         self._exchanges: list[ExchangeEntry] = []
+        self._feed_credentials: dict[str, dict[str, bytes]] = {}
         self._data_lock = threading.Lock()
 
         # Restore persisted state (overlays on top of defaults)
@@ -144,11 +145,18 @@ class RuntimeConfigStore:
                 }
                 exchanges_data.append(ex_dict)
 
+            feed_creds_data: dict[str, dict[str, str]] = {}
+            for conn_name, fields in self._feed_credentials.items():
+                feed_creds_data[conn_name] = {
+                    k: base64.b64encode(v).decode() for k, v in fields.items()
+                }
+
             state = {
                 "trading": dict(self._trading),
                 "strategy": dict(self._strategy),
                 "risk": dict(self._risk),
                 "exchanges": exchanges_data,
+                "feed_credentials": feed_creds_data,
             }
 
             # Ensure config directory exists
@@ -246,9 +254,25 @@ class RuntimeConfigStore:
                         logger.exception("Failed to restore exchange entry %d — skipping", i)
                 self._exchanges = restored
 
+            # Restore feed credentials
+            if "feed_credentials" in state and isinstance(state["feed_credentials"], dict):
+                restored_creds: dict[str, dict[str, bytes]] = {}
+                for conn_name, fields in state["feed_credentials"].items():
+                    try:
+                        restored_creds[conn_name] = {
+                            k: base64.b64decode(v) for k, v in fields.items()
+                        }
+                    except Exception:
+                        logger.exception(
+                            "Failed to restore feed credentials for %s — skipping",
+                            conn_name,
+                        )
+                self._feed_credentials = restored_creds
+
             logger.info(
-                "Restored config state from disk (%d exchanges)",
+                "Restored config state from disk (%d exchanges, %d feed credentials)",
                 len(self._exchanges),
+                len(self._feed_credentials),
             )
 
         except Exception:
@@ -307,6 +331,50 @@ class RuntimeConfigStore:
             result = dict(self._risk)
         self._save_to_disk()
         return result
+
+    # ---- Feed credential management ----
+
+    def get_feed_credential(self, connection_name: str, field_key: str) -> bytes | None:
+        """Get an encrypted credential for a connection field."""
+        with self._data_lock:
+            conn = self._feed_credentials.get(connection_name)
+            if conn is None:
+                return None
+            return conn.get(field_key)
+
+    def set_feed_credentials(
+        self,
+        connection_name: str,
+        credentials: dict[str, str],
+        vault: Vault,
+    ) -> None:
+        """Encrypt and store credentials for a connection.
+
+        Args:
+            connection_name: The connection name (e.g. "CoinMarketCap").
+            credentials: Plaintext credential key-value pairs to encrypt.
+            vault: Vault instance for encryption.
+        """
+        with self._data_lock:
+            encrypted: dict[str, bytes] = {}
+            for key, value in credentials.items():
+                if value:  # skip empty values
+                    encrypted[key] = vault.encrypt(value)
+            if encrypted:
+                self._feed_credentials[connection_name] = encrypted
+        self._save_to_disk()
+
+    def get_feed_credential_decrypted(
+        self,
+        connection_name: str,
+        field_key: str,
+        vault: Vault,
+    ) -> str | None:
+        """Decrypt and return a feed credential value."""
+        enc = self.get_feed_credential(connection_name, field_key)
+        if enc is None:
+            return None
+        return vault.decrypt(enc)
 
     # ---- Exchange management ----
 

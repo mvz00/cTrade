@@ -20,3 +20,14 @@ export function useTestConnection() {
     },
   });
 }
+
+export function useUpdateConnectionCredentials() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, credentials }: { name: string; credentials: Record<string, string> }) =>
+      api.updateConnectionCredentials(name, { credentials }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['connections'] });
+    },
+  });
+}
