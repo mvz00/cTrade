@@ -1,0 +1,43 @@
+# Version control
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+
+# Node / Frontend dev artifacts
+frontend/node_modules
+frontend/dist
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile
+
+# Build artifacts
+build_result.txt
+dist
+
+# Claude / misc
+.claude
+*.md
