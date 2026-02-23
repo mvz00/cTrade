@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { DashboardPage } from '@/pages/Dashboard/DashboardPage';
 import { TradingPage } from '@/pages/Trading/TradingPage';
 import { ConfigPage } from '@/pages/Configuration/ConfigPage';
+import { ConnectionsPage } from '@/pages/Connections/ConnectionsPage';
 import { SignalsPage } from '@/pages/Signals/SignalsPage';
 import { BacktestPage } from '@/pages/Backtesting/BacktestPage';
 import { AlertsPage } from '@/pages/Alerts/AlertsPage';
@@ -50,6 +51,7 @@ export function App() {
             <Route path={ROUTES.DASHBOARD} element={<DashboardPage />} />
             <Route path={ROUTES.TRADING} element={<TradingPage />} />
             <Route path={ROUTES.CONFIGURATION} element={<ConfigPage />} />
+            <Route path={ROUTES.CONNECTIONS} element={<ConnectionsPage />} />
             <Route path={ROUTES.SIGNALS} element={<SignalsPage />} />
             <Route path={ROUTES.INTELLIGENCE} element={<IntelligencePage />} />
             <Route path={ROUTES.SCREENER} element={<ScreenerPage />} />

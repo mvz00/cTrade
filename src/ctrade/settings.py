@@ -18,10 +18,11 @@ and each sub-model's independent env loading.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -141,6 +142,16 @@ class AppSettings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    feeds_enabled: bool = True  # Set CTRADE_FEEDS_ENABLED=false for lean deployments
+
+    @field_validator("api_port", mode="before")
+    @classmethod
+    def _use_railway_port(cls, v: Any) -> Any:
+        """Railway injects PORT env var; use it when CTRADE_API_PORT is not set."""
+        port = os.environ.get("PORT")
+        if port:
+            return int(port)
+        return v
 
     # Encryption key for API credential storage
     encryption_key: SecretStr = Field(default=SecretStr(""))

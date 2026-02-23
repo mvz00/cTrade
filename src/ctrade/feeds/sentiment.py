@@ -141,14 +141,10 @@ class SentimentFeed:
 
         self._enabled = True
         self._is_running = True
-        # Fetch immediately, then start background loop
-        await self._fetch_all_sources()
+        # Start background polling — first fetch happens after a short delay
+        # so the server can begin accepting healthcheck requests immediately.
         self._fetch_task = asyncio.create_task(self._polling_loop())
-        logger.info(
-            "Sentiment feed started (poll interval=%ds, %d data points loaded)",
-            self._poll_interval,
-            sum(len(pts) for pts in self._data_points.values()),
-        )
+        logger.info("Sentiment feed started (poll interval=%ds, first fetch in ~10s)", self._poll_interval)
 
     async def stop(self) -> None:
         """Stop periodic fetching."""
@@ -228,6 +224,16 @@ class SentimentFeed:
     # ---- Internal polling ----
 
     async def _polling_loop(self) -> None:
+        # Short initial delay so the server can start accepting requests first
+        try:
+            await asyncio.sleep(10)
+            if self._is_running:
+                await self._fetch_all_sources()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("Sentiment feed initial fetch error")
+
         while self._is_running:
             try:
                 await asyncio.sleep(self._poll_interval)

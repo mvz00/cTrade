@@ -118,14 +118,10 @@ class CoinMarketCapFeed:
 
         self._enabled = True
         self._is_running = True
-        # Fetch immediately, then start background loop
-        await self._fetch_listings(api_key)
+        # Start background polling — first fetch happens after a short delay
+        # so the server can begin accepting healthcheck requests immediately.
         self._fetch_task = asyncio.create_task(self._polling_loop(api_key))
-        logger.info(
-            "CMC feed started (cache TTL=%ds, %d listings loaded)",
-            _CACHE_TTL_SECONDS,
-            len(self._listings),
-        )
+        logger.info("CMC feed started (cache TTL=%ds, first fetch in ~10s)", _CACHE_TTL_SECONDS)
 
     async def stop(self) -> None:
         """Stop periodic fetching."""
@@ -145,6 +141,16 @@ class CoinMarketCapFeed:
     # ------ Internal polling ------
 
     async def _polling_loop(self, api_key: str) -> None:
+        # Short initial delay so the server can start accepting requests first
+        try:
+            await asyncio.sleep(10)
+            if self._is_running:
+                await self._fetch_listings(api_key)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("CMC initial fetch error")
+
         while self._is_running:
             try:
                 await asyncio.sleep(_CACHE_TTL_SECONDS)
