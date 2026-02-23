@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from ctrade.feeds.social_velocity import SocialVelocityFeed
 
         async def _start_feeds() -> None:
-            """Start all data feeds sequentially in background."""
+            """Start all data feeds with staggered delays to avoid request burst."""
             feeds = [
                 CoinMarketCapFeed.get_instance(),
                 SentimentFeed.get_instance(),
@@ -143,11 +143,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 CVDFeed.get_instance(),
                 SocialVelocityFeed.get_instance(),
             ]
-            for feed in feeds:
+            for i, feed in enumerate(feeds):
                 try:
                     await feed.start()
                 except Exception as e:
                     logger.warning("Feed %s failed to start (non-fatal): %s", feed.name, e)
+                # Stagger feed starts by 5s each so first-fetches don't all
+                # fire at T+10s (each feed has its own 10s internal delay).
+                if i < len(feeds) - 1:
+                    await asyncio.sleep(5)
             logger.info("All data feeds started")
 
         feed_task = asyncio.create_task(_start_feeds())

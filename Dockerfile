@@ -42,10 +42,9 @@ FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 
-# Runtime system deps only
+# Runtime system deps only (libpq5 for asyncpg)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
-        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed Python packages from builder
@@ -77,9 +76,10 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${CTRADE_API_PORT}/api/v1/health || exit 1
+# NOTE: No Dockerfile HEALTHCHECK — Railway uses its own healthcheck
+# configured in railway.json (healthcheckPath: /api/v1/health).
+# A Dockerfile HEALTHCHECK would conflict because Railway sets PORT
+# dynamically, but CTRADE_API_PORT defaults to 8000.
 
 # Start the app (Railway's $PORT is read directly by settings.py)
 CMD ["python", "-m", "ctrade.main"]
