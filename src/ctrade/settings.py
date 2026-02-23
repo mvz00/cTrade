@@ -4,6 +4,16 @@ Priority (highest to lowest):
 1. Environment variables (CTRADE_ prefix)
 2. .env file
 3. Hardcoded defaults in Pydantic models
+
+Env var naming: CTRADE_{section}__{field}
+  e.g. CTRADE_FEEDS__COINMARKETCAP_API_KEY  →  settings.feeds.coinmarketcap_api_key
+       CTRADE_DB__URL                        →  settings.db.url
+       CTRADE_AUTH__ENABLED                  →  settings.auth.enabled
+
+Sub-models are plain BaseModel (not BaseSettings) so that only the root
+AppSettings reads from the environment via env_nested_delimiter="__".
+This avoids conflicts between the parent's nested-delimiter resolution
+and each sub-model's independent env loading.
 """
 
 from __future__ import annotations
@@ -11,32 +21,26 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatabaseSettings(BaseSettings):
+class DatabaseSettings(BaseModel):
     """Database connection settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_DB__")
 
     url: str = "postgresql+asyncpg://ctrade:ctrade@localhost:5432/ctrade"
     pool_size: int = 10
     echo_sql: bool = False
 
 
-class RedisSettings(BaseSettings):
+class RedisSettings(BaseModel):
     """Redis connection settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_REDIS__")
 
     url: str = "redis://localhost:6379/0"
 
 
-class TradingSettings(BaseSettings):
+class TradingSettings(BaseModel):
     """Trading execution settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_TRADING__")
 
     mode: Literal["paper", "live"] = "paper"
     default_quote_currency: str = "USDT"
@@ -45,10 +49,8 @@ class TradingSettings(BaseSettings):
     order_timeout_seconds: int = 60
 
 
-class RiskSettings(BaseSettings):
+class RiskSettings(BaseModel):
     """Risk management settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_RISK__")
 
     max_position_pct: float = 0.10
     max_daily_loss_pct: float = 0.05
@@ -57,10 +59,8 @@ class RiskSettings(BaseSettings):
     default_take_profit_pct: float = 0.06
 
 
-class StrategySettings(BaseSettings):
+class StrategySettings(BaseModel):
     """Strategy parameter settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_STRATEGY__")
 
     active_strategy: str = "combined"
     technical_weight: float = 0.30
@@ -84,10 +84,8 @@ class StrategySettings(BaseSettings):
     bb_std: float = 2.0
 
 
-class FeedSettings(BaseSettings):
+class FeedSettings(BaseModel):
     """Data feed API keys and polling intervals."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_FEEDS__")
 
     coinmarketcap_api_key: SecretStr = SecretStr("")
     twitter_bearer_token: SecretStr = SecretStr("")
@@ -100,10 +98,8 @@ class FeedSettings(BaseSettings):
     candle_poll_interval_seconds: int = 60
 
 
-class AuthSettings(BaseSettings):
+class AuthSettings(BaseModel):
     """Dashboard authentication settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_AUTH__")
 
     enabled: bool = False  # Set to True in production (CTRADE_AUTH__ENABLED=true)
     secret_key: SecretStr = SecretStr("change-me-in-production")
@@ -113,19 +109,15 @@ class AuthSettings(BaseSettings):
     password_hash: str = ""
 
 
-class DiscordSettings(BaseSettings):
+class DiscordSettings(BaseModel):
     """Discord webhook notification settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_DISCORD__")
 
     enabled: bool = False
     webhook_url: SecretStr = SecretStr("")
 
 
-class TelegramSettings(BaseSettings):
+class TelegramSettings(BaseModel):
     """Telegram bot notification settings."""
-
-    model_config = SettingsConfigDict(env_prefix="CTRADE_TELEGRAM__")
 
     enabled: bool = False
     bot_token: SecretStr = SecretStr("")
@@ -153,7 +145,7 @@ class AppSettings(BaseSettings):
     # Encryption key for API credential storage
     encryption_key: SecretStr = Field(default=SecretStr(""))
 
-    # Sub-settings
+    # Sub-settings (resolved via env_nested_delimiter, e.g. CTRADE_DB__URL)
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     trading: TradingSettings = Field(default_factory=TradingSettings)
