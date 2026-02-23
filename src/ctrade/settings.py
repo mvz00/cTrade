@@ -142,6 +142,7 @@ class AppSettings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    feeds_enabled: bool = True  # Set CTRADE_FEEDS_ENABLED=false for lean deployments
 
     @field_validator("api_port", mode="before")
     @classmethod

@@ -121,36 +121,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     print("[cTrade] Core services ready — starting server...", flush=True)
 
-    # Start data feeds in background so the server can begin accepting
-    # requests immediately (feeds fetch from external APIs on start which
-    # can take 15-60s and would block the healthcheck otherwise).
-    from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
-    from ctrade.feeds.cvd import CVDFeed
-    from ctrade.feeds.derivatives import DerivativesFeed
-    from ctrade.feeds.market_sentiment import MarketSentimentFeed
-    from ctrade.feeds.onchain import OnChainFeed
-    from ctrade.feeds.sentiment import SentimentFeed
-    from ctrade.feeds.social_velocity import SocialVelocityFeed
+    # Start data feeds in background (skipped when CTRADE_FEEDS_ENABLED=false)
+    feed_task: asyncio.Task[None] | None = None
+    if settings.feeds_enabled:
+        from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+        from ctrade.feeds.cvd import CVDFeed
+        from ctrade.feeds.derivatives import DerivativesFeed
+        from ctrade.feeds.market_sentiment import MarketSentimentFeed
+        from ctrade.feeds.onchain import OnChainFeed
+        from ctrade.feeds.sentiment import SentimentFeed
+        from ctrade.feeds.social_velocity import SocialVelocityFeed
 
-    async def _start_feeds() -> None:
-        """Start all data feeds sequentially in background."""
-        feeds = [
-            CoinMarketCapFeed.get_instance(),
-            SentimentFeed.get_instance(),
-            OnChainFeed.get_instance(),
-            DerivativesFeed.get_instance(),
-            MarketSentimentFeed.get_instance(),
-            CVDFeed.get_instance(),
-            SocialVelocityFeed.get_instance(),
-        ]
-        for feed in feeds:
-            try:
-                await feed.start()
-            except Exception as e:
-                logger.warning("Feed %s failed to start (non-fatal): %s", feed.name, e)
-        logger.info("All data feeds started")
+        async def _start_feeds() -> None:
+            """Start all data feeds sequentially in background."""
+            feeds = [
+                CoinMarketCapFeed.get_instance(),
+                SentimentFeed.get_instance(),
+                OnChainFeed.get_instance(),
+                DerivativesFeed.get_instance(),
+                MarketSentimentFeed.get_instance(),
+                CVDFeed.get_instance(),
+                SocialVelocityFeed.get_instance(),
+            ]
+            for feed in feeds:
+                try:
+                    await feed.start()
+                except Exception as e:
+                    logger.warning("Feed %s failed to start (non-fatal): %s", feed.name, e)
+            logger.info("All data feeds started")
 
-    feed_task = asyncio.create_task(_start_feeds())
+        feed_task = asyncio.create_task(_start_feeds())
+    else:
+        print("[cTrade] Data feeds disabled (CTRADE_FEEDS_ENABLED=false)", flush=True)
+        logger.info("Data feeds disabled via CTRADE_FEEDS_ENABLED=false")
 
     # Register notification channels (optional — only when env vars are set)
     from ctrade.notifications.channels.router import NotificationRouter
@@ -183,20 +186,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Shutting down cTrade...")
 
     # Cancel feed startup if still running, then stop all feeds
-    if not feed_task.done():
-        feed_task.cancel()
-        try:
-            await feed_task
-        except asyncio.CancelledError:
-            pass
+    if feed_task is not None:
+        if not feed_task.done():
+            feed_task.cancel()
+            try:
+                await feed_task
+            except asyncio.CancelledError:
+                pass
 
-    await SocialVelocityFeed.get_instance().stop()
-    await CVDFeed.get_instance().stop()
-    await MarketSentimentFeed.get_instance().stop()
-    await DerivativesFeed.get_instance().stop()
-    await OnChainFeed.get_instance().stop()
-    await SentimentFeed.get_instance().stop()
-    await CoinMarketCapFeed.get_instance().stop()
+        from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
+        from ctrade.feeds.cvd import CVDFeed
+        from ctrade.feeds.derivatives import DerivativesFeed
+        from ctrade.feeds.market_sentiment import MarketSentimentFeed
+        from ctrade.feeds.onchain import OnChainFeed
+        from ctrade.feeds.sentiment import SentimentFeed
+        from ctrade.feeds.social_velocity import SocialVelocityFeed
+
+        await SocialVelocityFeed.get_instance().stop()
+        await CVDFeed.get_instance().stop()
+        await MarketSentimentFeed.get_instance().stop()
+        await DerivativesFeed.get_instance().stop()
+        await OnChainFeed.get_instance().stop()
+        await SentimentFeed.get_instance().stop()
+        await CoinMarketCapFeed.get_instance().stop()
 
     if _event_bus:
         await _event_bus.stop()

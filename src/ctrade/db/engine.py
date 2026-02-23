@@ -84,11 +84,26 @@ async def ping_db(timeout: float = 10.0) -> bool:
         return False
 
 
+_DISPOSE_TIMEOUT_SECONDS = 5
+
+
 async def close_db() -> None:
-    """Close the database engine and all connections."""
+    """Close the database engine and all connections.
+
+    Uses a timeout to avoid hanging if asyncpg has pending connections
+    (e.g. from a cancelled ping attempt against an unreachable host).
+    """
     global _engine, _session_factory
     if _engine is not None:
-        await _engine.dispose()
+        try:
+            await asyncio.wait_for(_engine.dispose(), timeout=_DISPOSE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Engine dispose timed out after %ds — forcing cleanup",
+                _DISPOSE_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning("Engine dispose failed: %s", exc)
         _engine = None
         _session_factory = None
         logger.info("Database engine closed")

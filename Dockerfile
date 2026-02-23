@@ -28,7 +28,7 @@ RUN cd frontend && npm ci --ignore-scripts
 COPY frontend/ frontend/
 RUN cd frontend && npm run build
 
-# ---- Python: install app + core deps (no torch/transformers) ----
+# ---- Python: install app + core deps ----
 COPY src/ src/
 COPY pyproject.toml alembic.ini ./
 COPY alembic/ alembic/
@@ -36,13 +36,6 @@ COPY config/ config/
 
 # Install the app and all core dependencies (non-editable for multi-stage)
 RUN pip install --no-cache-dir .
-
-# ---- ML deps: CPU-only PyTorch + transformers (installed LAST) ----
-# This ensures the CPU index is used and nothing overwrites it.
-# Saves ~1.5 GB vs the default CUDA build from PyPI.
-RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir transformers
 
 # --------------- Stage 2: Runtime ---------------
 FROM python:3.13-slim AS runtime
@@ -52,7 +45,6 @@ WORKDIR /app
 # Runtime system deps only
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
-        libgomp1 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
