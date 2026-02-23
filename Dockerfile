@@ -21,17 +21,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Python dependencies ----
-# Install CPU-only PyTorch first (saves ~1.5 GB vs CUDA build)
-RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu
-
-# Copy only dependency metadata first (better layer caching)
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir . 2>/dev/null || true
-# The above may partially fail because src/ctrade isn't copied yet.
-# We do a proper install after copying source below.
-
 # ---- Frontend build ----
 COPY frontend/package.json frontend/package-lock.json* frontend/
 RUN cd frontend && npm ci --ignore-scripts
@@ -39,14 +28,21 @@ RUN cd frontend && npm ci --ignore-scripts
 COPY frontend/ frontend/
 RUN cd frontend && npm run build
 
-# ---- Copy Python source & install ----
+# ---- Python: install app + core deps (no torch/transformers) ----
 COPY src/ src/
 COPY pyproject.toml alembic.ini ./
 COPY alembic/ alembic/
 COPY config/ config/
 
-# Full install (non-editable — required for multi-stage copy to work)
+# Install the app and all core dependencies (non-editable for multi-stage)
 RUN pip install --no-cache-dir .
+
+# ---- ML deps: CPU-only PyTorch + transformers (installed LAST) ----
+# This ensures the CPU index is used and nothing overwrites it.
+# Saves ~1.5 GB vs the default CUDA build from PyPI.
+RUN pip install --no-cache-dir \
+    torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir transformers
 
 # --------------- Stage 2: Runtime ---------------
 FROM python:3.13-slim AS runtime

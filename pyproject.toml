@@ -29,9 +29,6 @@ dependencies = [
     # HTTP & feeds
     "aiohttp>=3.9.0",
     "feedparser>=6.0.0",
-    # Sentiment analysis
-    "transformers>=4.40.0",
-    "torch>=2.2.0",
     # Scheduling
     "apscheduler>=3.10.0",
     # Cache & pub/sub
@@ -47,6 +44,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ml = [
+    "transformers>=4.40.0",
+    "torch>=2.2.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
