@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -101,7 +102,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from ctrade.api.websocket import register_event_forwarder
     register_event_forwarder(_event_bus)
 
-    # Start data feeds (each is no-op if preconditions not met)
+    # Start data feeds in background so the server can begin accepting
+    # requests immediately (feeds fetch from external APIs on start which
+    # can take 15-60s and would block the healthcheck otherwise).
     from ctrade.feeds.coinmarketcap import CoinMarketCapFeed
     from ctrade.feeds.cvd import CVDFeed
     from ctrade.feeds.derivatives import DerivativesFeed
@@ -110,26 +113,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from ctrade.feeds.sentiment import SentimentFeed
     from ctrade.feeds.social_velocity import SocialVelocityFeed
 
-    cmc_feed = CoinMarketCapFeed.get_instance()
-    await cmc_feed.start()
+    async def _start_feeds() -> None:
+        """Start all data feeds sequentially in background."""
+        feeds = [
+            CoinMarketCapFeed.get_instance(),
+            SentimentFeed.get_instance(),
+            OnChainFeed.get_instance(),
+            DerivativesFeed.get_instance(),
+            MarketSentimentFeed.get_instance(),
+            CVDFeed.get_instance(),
+            SocialVelocityFeed.get_instance(),
+        ]
+        for feed in feeds:
+            try:
+                await feed.start()
+            except Exception as e:
+                logger.warning("Feed %s failed to start (non-fatal): %s", feed.name, e)
+        logger.info("All data feeds started")
 
-    sentiment_feed = SentimentFeed.get_instance()
-    await sentiment_feed.start()
-
-    onchain_feed = OnChainFeed.get_instance()
-    await onchain_feed.start()
-
-    derivatives_feed = DerivativesFeed.get_instance()
-    await derivatives_feed.start()
-
-    mkt_sentiment_feed = MarketSentimentFeed.get_instance()
-    await mkt_sentiment_feed.start()
-
-    cvd_feed = CVDFeed.get_instance()
-    await cvd_feed.start()
-
-    social_velocity_feed = SocialVelocityFeed.get_instance()
-    await social_velocity_feed.start()
+    feed_task = asyncio.create_task(_start_feeds())
 
     # Register notification channels (optional — only when env vars are set)
     from ctrade.notifications.channels.router import NotificationRouter
@@ -160,13 +162,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Shutdown ---
     logger.info("Shutting down cTrade...")
 
-    await social_velocity_feed.stop()
-    await cvd_feed.stop()
-    await mkt_sentiment_feed.stop()
-    await derivatives_feed.stop()
-    await onchain_feed.stop()
-    await sentiment_feed.stop()
-    await cmc_feed.stop()
+    # Cancel feed startup if still running, then stop all feeds
+    if not feed_task.done():
+        feed_task.cancel()
+        try:
+            await feed_task
+        except asyncio.CancelledError:
+            pass
+
+    await SocialVelocityFeed.get_instance().stop()
+    await CVDFeed.get_instance().stop()
+    await MarketSentimentFeed.get_instance().stop()
+    await DerivativesFeed.get_instance().stop()
+    await OnChainFeed.get_instance().stop()
+    await SentimentFeed.get_instance().stop()
+    await CoinMarketCapFeed.get_instance().stop()
 
     if _event_bus:
         await _event_bus.stop()
