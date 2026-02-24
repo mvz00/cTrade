@@ -487,12 +487,13 @@ async def test_connection(name: str) -> ConnectionTestResult:
 
 
 async def _test_exchange_connection(name: str, tested_at: str) -> ConnectionTestResult:
-    """Test an exchange connection via ccxt.
+    """Test an exchange connection via ccxt, with native API fallback for CoinSpot.
 
     If ``name`` is ``"Exchange: kraken"`` etc., tests that specific exchange.
     Otherwise tests the first configured exchange.
     """
     start = time.monotonic()
+    exchange_name = ""
     try:
         from ctrade.core.config_store import RuntimeConfigStore
         from ctrade.exchange.market_data import MarketDataProvider
@@ -514,6 +515,9 @@ async def _test_exchange_connection(name: str, tested_at: str) -> ConnectionTest
 
         exchange = await provider._create_ccxt_exchange(exchange_id)
         if exchange is None:
+            # CoinSpot fallback: try native API
+            if exchange_name == "coinspot":
+                return await _test_coinspot_native(name, tested_at, exchange_id)
             return ConnectionTestResult(
                 name=name,
                 success=False,
@@ -534,6 +538,9 @@ async def _test_exchange_connection(name: str, tested_at: str) -> ConnectionTest
         finally:
             await exchange.close()
     except Exception as exc:
+        # CoinSpot fallback when ccxt throws
+        if exchange_name == "coinspot":
+            return await _test_coinspot_native(name, tested_at)
         latency = int((time.monotonic() - start) * 1000)
         return ConnectionTestResult(
             name=name,
@@ -541,4 +548,70 @@ async def _test_exchange_connection(name: str, tested_at: str) -> ConnectionTest
             latency_ms=latency,
             message=str(exc),
             tested_at=tested_at,
+        )
+
+
+async def _test_coinspot_native(
+    name: str, tested_at: str, exchange_id: str | None = None
+) -> ConnectionTestResult:
+    """Test CoinSpot connection using their native balance API."""
+    start = time.monotonic()
+    try:
+        from ctrade.exchange.market_data import MarketDataProvider
+
+        if exchange_id:
+            from ctrade.core.config_store import RuntimeConfigStore
+            from ctrade.security.vault import Vault
+            from ctrade.settings import get_settings
+
+            store = RuntimeConfigStore.get()
+            entry = store.get_exchange_entry(exchange_id)
+            if not entry:
+                return ConnectionTestResult(
+                    name=name, success=False, latency_ms=0,
+                    message="Exchange entry not found", tested_at=tested_at,
+                )
+            settings = get_settings()
+            key = settings.encryption_key.get_secret_value()
+            vault = Vault(key)
+            api_key = vault.decrypt(entry.api_key_encrypted)
+            api_secret = vault.decrypt(entry.api_secret_encrypted)
+
+            result = await MarketDataProvider._fetch_coinspot_balance_native(
+                api_key, api_secret
+            )
+            latency = int((time.monotonic() - start) * 1000)
+            if result is not None:
+                return ConnectionTestResult(
+                    name=name, success=True, latency_ms=latency,
+                    message=f"Connected via native API — {len(result)} currencies ({latency}ms)",
+                    tested_at=tested_at,
+                )
+            return ConnectionTestResult(
+                name=name, success=False, latency_ms=latency,
+                message="Native API returned no data", tested_at=tested_at,
+            )
+        # No exchange_id: just test public endpoint
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://www.coinspot.com.au/pubapi/v2/latest",
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                latency = int((time.monotonic() - start) * 1000)
+                if resp.status == 200:
+                    return ConnectionTestResult(
+                        name=name, success=True, latency_ms=latency,
+                        message=f"Connected via public API ({latency}ms)",
+                        tested_at=tested_at,
+                    )
+                return ConnectionTestResult(
+                    name=name, success=False, latency_ms=latency,
+                    message=f"HTTP {resp.status}", tested_at=tested_at,
+                )
+    except Exception as exc:
+        latency = int((time.monotonic() - start) * 1000)
+        return ConnectionTestResult(
+            name=name, success=False, latency_ms=latency,
+            message=str(exc), tested_at=tested_at,
         )

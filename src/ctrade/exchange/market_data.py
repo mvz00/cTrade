@@ -7,10 +7,12 @@ so the app works out of the box without API keys.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import math
 import random
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, ClassVar
@@ -295,8 +297,61 @@ class MarketDataProvider:
             finally:
                 await exchange.close()
 
+        # Fallback: try CoinSpot public prices API for AUD pairs
+        if symbol.endswith("/AUD"):
+            ticker = await self._fetch_coinspot_price_native(symbol)
+            if ticker:
+                return ticker
+
         logger.debug("ccxt ticker fetch failed for %s on all exchanges", symbol)
         return None
+
+    @staticmethod
+    async def _fetch_coinspot_price_native(symbol: str) -> Ticker | None:
+        """Fetch price from CoinSpot's public prices API (no auth needed).
+
+        CoinSpot public endpoint returns latest prices for all coins in AUD.
+        """
+        import aiohttp
+
+        parts = symbol.split("/")
+        if len(parts) != 2 or parts[1] != "AUD":
+            return None
+        base = parts[0].lower()
+
+        url = "https://www.coinspot.com.au/pubapi/v2/latest"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+
+            prices = data.get("prices", {})
+            coin_data = prices.get(base)
+            if not coin_data:
+                return None
+
+            last = Decimal(str(coin_data.get("last", 0)))
+            bid = Decimal(str(coin_data.get("bid", 0) or last))
+            ask = Decimal(str(coin_data.get("ask", 0) or last))
+
+            return Ticker(
+                pair_symbol=symbol,
+                last_price=last,
+                bid=bid,
+                ask=ask,
+                high_24h=Decimal("0"),
+                low_24h=Decimal("0"),
+                volume_24h=Decimal("0"),
+                change_pct_24h=0.0,
+                timestamp=datetime.now(timezone.utc),
+            )
+        except Exception as e:
+            logger.debug("CoinSpot public price API failed: %s", e)
+            return None
 
     async def _try_ccxt_candles(
         self, symbol: str, timeframe: str, limit: int
@@ -329,6 +384,65 @@ class MarketDataProvider:
 
     # ---- Live exchange balance ----
 
+    @staticmethod
+    async def _fetch_coinspot_balance_native(
+        api_key: str, api_secret: str
+    ) -> dict[str, float] | None:
+        """Fetch CoinSpot balances using their native REST API.
+
+        CoinSpot's ccxt integration is unreliable (GitHub #8175).
+        Their native v2 read-only endpoint works with read-only API keys.
+
+        Returns ``{currency: amount}`` dict or ``None`` on failure.
+        """
+        import aiohttp
+
+        url = "https://www.coinspot.com.au/api/v2/ro/my/balances"
+        nonce = str(int(time.time() * 1000))
+        body = f'{{"nonce":{nonce}}}'
+        sign = hmac.new(
+            api_secret.encode("utf-8"),
+            body.encode("utf-8"),
+            hashlib.sha512,
+        ).hexdigest()
+
+        headers = {
+            "Content-Type": "application/json",
+            "key": api_key,
+            "sign": sign,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url, data=body, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(
+                            "CoinSpot native API returned HTTP %d", resp.status
+                        )
+                        return None
+                    data = await resp.json()
+
+            if data.get("status") != "ok":
+                logger.warning("CoinSpot native API error: %s", data.get("message", "?"))
+                return None
+
+            balances: dict[str, float] = {}
+            for coin_entry in data.get("balances", []):
+                for currency, info in coin_entry.items():
+                    bal = float(info.get("balance", 0))
+                    if bal > 0:
+                        balances[currency.upper()] = bal
+
+            logger.info(
+                "CoinSpot native API: fetched %d non-zero balances", len(balances)
+            )
+            return balances
+        except Exception as e:
+            logger.warning("CoinSpot native API failed: %s", e)
+            return None
+
     async def fetch_exchange_balance(self) -> dict[str, float] | None:
         """Fetch real account balances from ALL configured exchanges.
 
@@ -353,23 +467,48 @@ class MarketDataProvider:
         for ex_info in exchanges_list:
             if not ex_info.get("is_active", True):
                 continue
+
+            ccxt_ok = False
             exchange = await self._create_ccxt_exchange(ex_info["id"])
-            if not exchange:
-                continue
-            try:
-                raw = await exchange.fetch_balance()
-                free: dict[str, Any] = raw.get("free", {})
-                for cur, amt in free.items():
-                    if amt and float(amt) > 0:
-                        merged[cur] = merged.get(cur, 0.0) + float(amt)
-                any_success = True
-            except Exception as e:
-                logger.warning(
-                    "Failed to fetch balance from %s: %s",
-                    ex_info.get("name", "?"), e,
-                )
-            finally:
-                await exchange.close()
+            if exchange:
+                try:
+                    raw = await exchange.fetch_balance()
+                    free: dict[str, Any] = raw.get("free", {})
+                    for cur, amt in free.items():
+                        if amt and float(amt) > 0:
+                            merged[cur] = merged.get(cur, 0.0) + float(amt)
+                    any_success = True
+                    ccxt_ok = True
+                except Exception as e:
+                    logger.warning(
+                        "ccxt fetch_balance failed for %s: %s",
+                        ex_info.get("name", "?"), e,
+                    )
+                finally:
+                    await exchange.close()
+
+            # Fallback: CoinSpot native API when ccxt fails
+            if not ccxt_ok and ex_info.get("name", "").lower() == "coinspot":
+                logger.info("Trying CoinSpot native API for balance...")
+                entry = store.get_exchange_entry(ex_info["id"])
+                if entry:
+                    from ctrade.security.vault import Vault
+                    from ctrade.settings import get_settings
+                    try:
+                        settings = get_settings()
+                        key = settings.encryption_key.get_secret_value()
+                        vault = Vault(key)
+                        api_key = vault.decrypt(entry.api_key_encrypted)
+                        api_secret = vault.decrypt(entry.api_secret_encrypted)
+                        native_bal = await self._fetch_coinspot_balance_native(
+                            api_key, api_secret
+                        )
+                        if native_bal:
+                            for cur, amt in native_bal.items():
+                                merged[cur] = merged.get(cur, 0.0) + amt
+                            any_success = True
+                    except Exception as e:
+                        logger.warning("CoinSpot native fallback failed: %s", e)
 
         return merged if any_success else None
 
