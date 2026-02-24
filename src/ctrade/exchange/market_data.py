@@ -1005,9 +1005,25 @@ class MarketDataProvider:
         return candles
 
     def get_current_price(self, symbol: str) -> float:
-        """Get current simulated price synchronously (for paper engine)."""
+        """Get current price for paper engine P&L calculations.
+
+        Priority: ticker cache (real exchange data) → sim prices → seed
+        prices → stablecoin detection → 100.0 fallback.
+        """
         with self._data_lock:
-            base = self._sim_prices.get(symbol, _SEED_PRICES.get(symbol, 100.0))
+            # 1. Check ticker cache first (real exchange prices from async fetches)
+            cached = self._ticker_cache.get(symbol)
+            if cached:
+                ticker, _ts = cached
+                return float(ticker.last_price)
+
+            # 2. Check sim prices / seed prices
+            base = self._sim_prices.get(symbol) or _SEED_PRICES.get(symbol)
+            if base is None:
+                # 3. Stablecoin pairs (USDC/USDT, DAI/USDT, etc.) → ~1.0
+                base_coin = symbol.split("/")[0] if "/" in symbol else symbol
+                base = 1.0 if base_coin in _CASH_CURRENCIES else 100.0
+
             change = self._sim_rng.gauss(0, 0.005)
             new_price = base * (1 + change)
             self._sim_prices[symbol] = new_price

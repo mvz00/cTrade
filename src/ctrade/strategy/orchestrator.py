@@ -800,6 +800,17 @@ class TradingOrchestrator:
         side_label = "BUY" if side == "buy" else "SHORT"
         log_type = "buy" if side == "buy" else "sell"
 
+        # Resolve exchange name for position tracking
+        exchange_name = "paper"
+        active_ex_id = getattr(self, "_active_exchange_id", None)
+        if active_ex_id:
+            try:
+                ex_entry = RuntimeConfigStore.get().get_exchange_entry(active_ex_id)
+                if ex_entry:
+                    exchange_name = ex_entry.name
+            except RuntimeError:
+                pass
+
         if quantity > 0:
             justification = _build_justification(
                 pair=pair, side=side_label, signal=signal,
@@ -810,11 +821,13 @@ class TradingOrchestrator:
                 side=side,
                 order_type="market",
                 quantity=quantity,
+                price=price,
                 signal_id=str(signal.id),
                 strategy_name=strategy_label,
                 justification=justification,
                 stop_loss=sl_price,
                 take_profit=tp_price,
+                exchange_name=exchange_name,
             )
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
             logger.info(
