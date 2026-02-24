@@ -653,27 +653,46 @@ class MarketDataProvider:
     async def fetch_exchange_portfolio(self) -> dict[str, Any] | None:
         """Build a portfolio summary from real exchange balances.
 
-        Returns a dict compatible with the ``PortfolioResponse`` schema,
-        or ``None`` if the balance fetch fails.
+        Delegates to ``fetch_per_exchange_portfolios()`` and aggregates,
+        ensuring the total always matches the sum of per-exchange values
+        (and the portfolio-history chart).
         """
-        balances = await self.fetch_exchange_balance()
-        if balances is None:
-            logger.warning("fetch_exchange_portfolio: balance fetch returned None")
+        per_exchange = await self.fetch_per_exchange_portfolios()
+        if not per_exchange:
+            logger.warning("fetch_exchange_portfolio: no exchange data returned")
             return None
 
-        logger.info(
-            "fetch_exchange_portfolio: pricing %d currencies: %s",
-            len(balances), list(balances.keys()),
-        )
+        # Aggregate across all exchanges
+        total_value = 0.0
+        total_positions = 0.0
+        total_open = 0
+        merged_cash: dict[str, float] = {}
 
-        result = await self._price_balances(balances)
+        for ex_name, portfolio in per_exchange.items():
+            total_value += portfolio["total_value_usd"]
+            total_positions += portfolio["positions_value"]
+            total_open += portfolio["open_positions"]
+            for cur, val in portfolio["cash_balance"].items():
+                merged_cash[cur] = merged_cash.get(cur, 0.0) + val
+
+        result = {
+            "cash_balance": {k: round(v, 2) for k, v in merged_cash.items()},
+            "total_value_usd": round(total_value, 2),
+            "positions_value": round(total_positions, 2),
+            "unrealized_pnl": 0.0,
+            "realized_pnl": 0.0,
+            "daily_pnl": 0.0,
+            "open_positions": total_open,
+            "closed_positions": 0,
+            "total_orders": 0,
+        }
 
         logger.info(
-            "fetch_exchange_portfolio: total=$%.2f (cash=$%.2f + positions=$%.2f), %d crypto holdings",
+            "fetch_exchange_portfolio: total=$%.2f (cash=$%.2f + positions=$%.2f), %d exchanges",
             result["total_value_usd"],
-            sum(result["cash_balance"].values()),
+            sum(merged_cash.values()),
             result["positions_value"],
-            result["open_positions"],
+            len(per_exchange),
         )
 
         return result
