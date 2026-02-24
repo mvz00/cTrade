@@ -176,6 +176,25 @@ export interface PlaceOrderRequest {
   price?: number;
 }
 
+export interface QuickBuyRequest {
+  symbol: string;
+  amount_usdt?: number;
+}
+
+export interface QuickBuyResponse {
+  success: boolean;
+  order_id: string | null;
+  symbol: string;
+  side: string;
+  quantity: number;
+  price: number;
+  amount_usdt: number;
+  stop_loss: number | null;
+  take_profit: number | null;
+  status: string;
+  error: string | null;
+}
+
 export interface Signal {
   id: string;
   pair_symbol: string;

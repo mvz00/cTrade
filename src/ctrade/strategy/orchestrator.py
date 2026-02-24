@@ -572,6 +572,24 @@ class TradingOrchestrator:
         composite = 0.5 + (raw_composite - 0.5) * amplification
         composite = round(max(0.0, min(1.0, composite)), 4)
 
+        # ---- Multi-timeframe outlook scores ----
+        # 1h outlook = composite (already based on 1h candle analysis + 7 sources)
+        outlook_1h = composite
+
+        # 24h/7d outlooks blend composite with CMC price change data
+        base_symbol = pair.split("/")[0]
+        cmc_listing = cmc_feed._listings_by_symbol.get(base_symbol)
+        if cmc_listing is not None:
+            pct_24h_score = CoinMarketCapFeed._pct_to_score(cmc_listing.pct_change_24h, scale=10.0)
+            pct_7d_score = CoinMarketCapFeed._pct_to_score(cmc_listing.pct_change_7d, scale=20.0)
+            outlook_24h = round(0.50 * composite + 0.50 * pct_24h_score, 4)
+            outlook_7d = round(0.60 * pct_7d_score + 0.40 * composite, 4)
+        else:
+            outlook_24h = composite
+            outlook_7d = composite
+
+        outlook = {"outlook_1h": outlook_1h, "outlook_24h": outlook_24h, "outlook_7d": outlook_7d}
+
         # ---- Multi-source agreement bonus ----
         # If sources agree, adjust thresholds to make it easier to trigger trades.
         # Even a single source with a clear directional bias gets a small bonus.
@@ -710,7 +728,8 @@ class TradingOrchestrator:
                 "signal", pair,
                 f"HOLD {pair} (confidence: {signal.confidence:.2f}{extra_str})",
                 {"confidence": signal.confidence, "action": "HOLD",
-                 "composite": composite, "agreement": agreement},
+                 "composite": composite, "agreement": agreement,
+                 **outlook},
             )
             return
 
@@ -725,6 +744,7 @@ class TradingOrchestrator:
                 portfolio, open_positions, max_open, max_order_usdt,
                 max_position_pct, composite, agreement,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
         elif strategy_mode == "short_only":
             await self._execute_short_only(
@@ -733,6 +753,7 @@ class TradingOrchestrator:
                 max_position_pct, composite, agreement,
                 short_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
         elif strategy_mode == "both":
             await self._execute_both(
@@ -741,6 +762,7 @@ class TradingOrchestrator:
                 max_position_pct, composite, agreement,
                 short_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
 
     # ------------------------------------------------------------------
@@ -918,6 +940,7 @@ class TradingOrchestrator:
         max_open: int, max_order_usdt: float, max_position_pct: float,
         composite: float, agreement: str,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
+        outlook: dict[str, float] | None = None,
     ) -> None:
         """Long-only mode: BUY opens long, SELL closes long."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -943,6 +966,7 @@ class TradingOrchestrator:
         max_open: int, max_order_usdt: float, max_position_pct: float,
         composite: float, agreement: str, short_min_1h_change_pct: float,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
+        outlook: dict[str, float] | None = None,
     ) -> None:
         """Short-only mode: SELL opens short (momentum filter), BUY closes short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -954,7 +978,8 @@ class TradingOrchestrator:
                 self._log_activity(
                     "signal", pair,
                     f"SHORT_ONLY skip {pair}: 1h change {pct}% < {short_min_1h_change_pct}% threshold",
-                    {"pair": pair, "pct_change_1h": pct, "threshold": short_min_1h_change_pct},
+                    {"pair": pair, "pct_change_1h": pct, "threshold": short_min_1h_change_pct,
+                     **(outlook or {})},
                 )
                 return
 
@@ -978,6 +1003,7 @@ class TradingOrchestrator:
         max_open: int, max_order_usdt: float, max_position_pct: float,
         composite: float, agreement: str, short_min_1h_change_pct: float,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
+        outlook: dict[str, float] | None = None,
     ) -> None:
         """Both mode: BUY closes short + opens long, SELL closes long + opens short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)

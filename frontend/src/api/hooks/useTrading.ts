@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
-import type { PlaceOrderRequest } from '../types';
+import type { PlaceOrderRequest, QuickBuyRequest } from '../types';
 
 export function usePairs() {
   return useQuery({ queryKey: ['trading', 'pairs'], queryFn: api.listPairs, refetchInterval: REFETCH_INTERVALS.TRADING });
@@ -129,6 +129,17 @@ export function useResetPaperEngine() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.resetPaperEngine(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trading'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useQuickBuy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: QuickBuyRequest) => api.quickBuy(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['trading'] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });

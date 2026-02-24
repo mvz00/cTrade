@@ -110,3 +110,22 @@ class ActivityEntry(BaseModel):
     pair: str
     message: str
     details: dict[str, Any] = {}
+
+
+class QuickBuyRequest(BaseModel):
+    symbol: str = Field(min_length=3, examples=["BTC/USDT"])
+    amount_usdt: float | None = Field(None, gt=0, description="Buy amount in USDT; defaults to max_order_usdt")
+
+
+class QuickBuyResponse(BaseModel):
+    success: bool
+    order_id: str | None = None
+    symbol: str
+    side: str = "buy"
+    quantity: float
+    price: float
+    amount_usdt: float
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    status: str
+    error: str | None = None

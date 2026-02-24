@@ -17,6 +17,8 @@ import type {
   TradingPair,
   Order,
   PlaceOrderRequest,
+  QuickBuyRequest,
+  QuickBuyResponse,
   Position,
   Portfolio,
   EngineStatus,
@@ -142,6 +144,8 @@ export const api = {
     apiFetch<Order[]>(`/trading/orders${status ? `?status=${status}` : ''}`),
   placeOrder: (body: PlaceOrderRequest) =>
     apiFetch<Order>('/trading/orders', { method: 'POST', body: JSON.stringify(body) }),
+  quickBuy: (body: QuickBuyRequest) =>
+    apiFetch<QuickBuyResponse>('/trading/quick-buy', { method: 'POST', body: JSON.stringify(body) }),
   listPositions: (status?: string) =>
     apiFetch<Position[]>(`/trading/positions${status ? `?status=${status}` : ''}`),
   closePosition: (id: string) =>
