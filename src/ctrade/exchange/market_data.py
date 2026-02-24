@@ -255,28 +255,48 @@ class MarketDataProvider:
             return None
 
     async def _try_ccxt_ticker(self, symbol: str) -> Ticker | None:
-        """Try to fetch ticker from a configured exchange."""
-        exchange = await self._create_ccxt_exchange()
-        if not exchange:
-            return None
+        """Try to fetch ticker from ALL configured exchanges.
+
+        Iterates every active exchange until one successfully returns
+        a ticker for ``symbol``.  Returns ``None`` only if every
+        exchange fails.
+        """
+        from ctrade.core.config_store import RuntimeConfigStore
         try:
-            data = await exchange.fetch_ticker(symbol)
-            return Ticker(
-                pair_symbol=symbol,
-                last_price=Decimal(str(data.get("last", 0))),
-                bid=Decimal(str(data.get("bid", 0) or 0)),
-                ask=Decimal(str(data.get("ask", 0) or 0)),
-                high_24h=Decimal(str(data.get("high", 0) or 0)),
-                low_24h=Decimal(str(data.get("low", 0) or 0)),
-                volume_24h=Decimal(str(data.get("baseVolume", 0) or 0)),
-                change_pct_24h=float(data.get("percentage", 0) or 0),
-                timestamp=datetime.now(timezone.utc),
-            )
-        except Exception as e:
-            logger.debug("ccxt ticker fetch failed for %s: %s", symbol, e)
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
             return None
-        finally:
-            await exchange.close()
+
+        if not exchanges_list:
+            return None
+
+        for ex_info in exchanges_list:
+            if not ex_info.get("is_active", True):
+                continue
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if not exchange:
+                continue
+            try:
+                data = await exchange.fetch_ticker(symbol)
+                return Ticker(
+                    pair_symbol=symbol,
+                    last_price=Decimal(str(data.get("last", 0))),
+                    bid=Decimal(str(data.get("bid", 0) or 0)),
+                    ask=Decimal(str(data.get("ask", 0) or 0)),
+                    high_24h=Decimal(str(data.get("high", 0) or 0)),
+                    low_24h=Decimal(str(data.get("low", 0) or 0)),
+                    volume_24h=Decimal(str(data.get("baseVolume", 0) or 0)),
+                    change_pct_24h=float(data.get("percentage", 0) or 0),
+                    timestamp=datetime.now(timezone.utc),
+                )
+            except Exception:
+                pass  # try next exchange
+            finally:
+                await exchange.close()
+
+        logger.debug("ccxt ticker fetch failed for %s on all exchanges", symbol)
+        return None
 
     async def _try_ccxt_candles(
         self, symbol: str, timeframe: str, limit: int
@@ -359,8 +379,8 @@ class MarketDataProvider:
         Returns a dict compatible with the ``PortfolioResponse`` schema,
         or ``None`` if the balance fetch fails.
 
-        Uses only real exchange tickers for pricing (never simulated fallback)
-        to avoid inflating dust balances with fake prices.
+        Tries real exchange tickers first (across all exchanges), then
+        falls back to seed prices for approximate valuation.
         """
         balances = await self.fetch_exchange_balance()
         if balances is None:
@@ -387,21 +407,39 @@ class MarketDataProvider:
                 rate = _FIAT_TO_USD.get(currency, 1.0)
                 cash_value += amount * rate
             else:
-                # Convert to USD using REAL exchange ticker only
-                # (never fall back to simulated prices for portfolio valuation)
+                # Try to convert to USD via real exchange ticker
                 symbol = f"{currency}/USDT"
                 try:
                     ticker = await self._try_ccxt_ticker(symbol)
                     if ticker is None:
-                        # Try with /USD pair (common on Kraken)
                         ticker = await self._try_ccxt_ticker(f"{currency}/USD")
                     if ticker is None:
-                        logger.debug(
-                            "No real ticker for %s (amount=%.8f), skipping",
-                            currency, amount,
+                        ticker = await self._try_ccxt_ticker(f"{currency}/AUD")
+                    if ticker is not None:
+                        price = float(ticker.last_price)
+                        # AUD ticker → convert to USD
+                        if ticker.pair_symbol.endswith("/AUD"):
+                            price *= _FIAT_TO_USD.get("AUD", 0.65)
+                        usd_value = amount * price
+                    else:
+                        # Fallback: use seed price for approximate valuation
+                        seed_price = _SEED_PRICES.get(
+                            f"{currency}/USDT",
+                            _SEED_PRICES.get(f"{currency}/USD", 0),
                         )
-                        continue
-                    usd_value = amount * float(ticker.last_price)
+                        if seed_price > 0:
+                            usd_value = amount * seed_price
+                            logger.info(
+                                "Using seed price for %s (%.8f × $%.2f = $%.2f)",
+                                currency, amount, seed_price, usd_value,
+                            )
+                        else:
+                            logger.debug(
+                                "No price for %s (amount=%.8f), skipping",
+                                currency, amount,
+                            )
+                            continue
+
                     # Skip dust (< $0.01)
                     if usd_value < 0.01:
                         continue
