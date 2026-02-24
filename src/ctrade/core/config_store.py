@@ -24,8 +24,12 @@ from ctrade.settings import AppSettings
 
 logger = logging.getLogger(__name__)
 
-# Path to the persisted state file (project_root/config/runtime_state.json)
-_STATE_FILE = Path(__file__).resolve().parents[3] / "config" / "runtime_state.json"
+# Path to the persisted state file (project_root/config/runtime_state.json).
+# In Docker (non-editable install), __file__ is in site-packages so the
+# parents[3] trick won't reach /app.  Use CTRADE_CONFIG_DIR when set.
+_config_env = os.environ.get("CTRADE_CONFIG_DIR")
+_CONFIG_DIR = Path(_config_env) if _config_env else Path(__file__).resolve().parents[3] / "config"
+_STATE_FILE = _CONFIG_DIR / "runtime_state.json"
 
 
 @dataclass

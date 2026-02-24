@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,8 +25,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/exchanges", tags=["exchanges"])
 
-# __file__ = src/ctrade/api/routers/exchanges.py → parents[4] = project root
-_EXCHANGES_TOML = Path(__file__).resolve().parents[4] / "config" / "exchanges.toml"
+# In Docker (non-editable install), __file__ is in site-packages so the
+# parents[4] trick won't reach /app.  Use CTRADE_CONFIG_DIR when set
+# (Dockerfile sets it to /app/config).
+_config_env = os.environ.get("CTRADE_CONFIG_DIR")
+_CONFIG_DIR = Path(_config_env) if _config_env else Path(__file__).resolve().parents[4] / "config"
+_EXCHANGES_TOML = _CONFIG_DIR / "exchanges.toml"
 
 
 def _load_available_exchanges() -> dict[str, dict]:

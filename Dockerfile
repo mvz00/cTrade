@@ -71,6 +71,9 @@ ENV CTRADE_API_PORT=8000
 # __file__-based path resolution won't reach /app from site-packages)
 ENV CTRADE_FRONTEND_DIR=/app/frontend/dist
 
+# Tell exchanges.py and config_store.py where the config dir lives
+ENV CTRADE_CONFIG_DIR=/app/config
+
 # Ensure Python output is sent straight to Railway logs (no buffering)
 ENV PYTHONUNBUFFERED=1
 
