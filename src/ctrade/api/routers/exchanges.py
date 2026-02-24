@@ -13,6 +13,7 @@ from ctrade.api.schemas.config import (
     ExchangeAddRequest,
     ExchangeResponse,
     ExchangeTestResponse,
+    ExchangeUpdateRequest,
 )
 from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.exchange.market_data import MarketDataProvider
@@ -113,6 +114,35 @@ async def delete_exchange(exchange_id: str) -> None:
         raise HTTPException(status_code=404, detail="Exchange not found")
     # Exchange removed → refresh available pairs
     MarketDataProvider.get_instance().clear_pairs_cache()
+
+
+@router.put("/{exchange_id}", response_model=ExchangeResponse)
+async def update_exchange(
+    exchange_id: str,
+    body: ExchangeUpdateRequest,
+    settings: AppSettings = Depends(get_app_settings),
+) -> ExchangeResponse:
+    """Update API credentials for an existing exchange.
+
+    Only non-empty fields are re-encrypted and updated.
+    """
+    if not body.api_key and not body.api_secret and body.passphrase is None:
+        raise HTTPException(
+            status_code=422, detail="No credential fields provided"
+        )
+
+    vault = _get_vault(settings)
+    store = RuntimeConfigStore.get()
+    result = store.update_exchange(
+        exchange_id,
+        vault,
+        api_key=body.api_key,
+        api_secret=body.api_secret,
+        passphrase=body.passphrase,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Exchange not found")
+    return ExchangeResponse(**result)
 
 
 @router.post("/{exchange_id}/test", response_model=ExchangeTestResponse)

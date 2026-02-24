@@ -80,6 +80,14 @@ class ExchangeAddRequest(BaseModel):
     passphrase: str | None = None
 
 
+class ExchangeUpdateRequest(BaseModel):
+    """Update exchange credentials — only provided fields are updated."""
+
+    api_key: str | None = None
+    api_secret: str | None = None
+    passphrase: str | None = None
+
+
 class ExchangeResponse(BaseModel):
     id: str
     name: str

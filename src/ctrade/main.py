@@ -185,6 +185,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"[cTrade] [6/6] Notifications FAILED (non-fatal): {e}", flush=True)
 
+    # === Auth diagnostics ===
+    if settings.auth.enabled:
+        if settings.auth.password_hash:
+            print("[cTrade] [auth] Auth ENABLED — password_hash configured", flush=True)
+        else:
+            print(
+                "[cTrade] [auth] WARNING: Auth ENABLED but password_hash is EMPTY! "
+                "Login will be rejected. Check env var: CTRADE_AUTH__PASSWORD_HASH "
+                "(double underscore between AUTH and PASSWORD_HASH)",
+                flush=True,
+            )
+    else:
+        print("[cTrade] [auth] Auth DISABLED — all logins accepted", flush=True)
+
     # === SERVER READY — this yield MUST always be reached ===
     print(f"[cTrade] === SERVER READY on 0.0.0.0:{settings.api_port} ===", flush=True)
 
