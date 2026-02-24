@@ -38,9 +38,24 @@ _SEED_PRICES: dict[str, float] = {
     # BTC pairs
     "ETH/BTC": 0.052,
     "SOL/BTC": 0.00216,
+    "XRP/BTC": 0.0000093,
+    "ADA/BTC": 0.0000067,
+    "BNB/BTC": 0.00866,
+    "LINK/BTC": 0.000216,
+    "AVAX/BTC": 0.000522,
+    "DOT/BTC": 0.000107,
+    "DOGE/BTC": 0.00000122,
     # AUD pairs (CoinSpot)
     "BTC/AUD": 103000.0,
     "ETH/AUD": 5400.0,
+    "SOL/AUD": 223.0,
+    "XRP/AUD": 0.96,
+    "ADA/AUD": 0.69,
+    "DOGE/AUD": 0.126,
+    "DOT/AUD": 11.10,
+    "AVAX/AUD": 54.0,
+    "LINK/AUD": 22.30,
+    "BNB/AUD": 893.0,
 }
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
@@ -284,28 +299,48 @@ class MarketDataProvider:
     # ---- Live exchange balance ----
 
     async def fetch_exchange_balance(self) -> dict[str, float] | None:
-        """Fetch real account balances from the configured exchange.
+        """Fetch real account balances from ALL configured exchanges.
 
-        Returns ``{currency: free_amount}`` for non-zero balances,
-        or ``None`` if no exchange is configured or the fetch fails.
+        Iterates every active exchange, fetches its free balances via ccxt,
+        and merges them into a single ``{currency: total_amount}`` dict.
+        If the same currency exists on multiple exchanges the amounts are
+        summed.  Returns ``None`` only if *no* exchange could be queried.
         """
-        exchange = await self._create_ccxt_exchange()
-        if not exchange:
-            return None
+        from ctrade.core.config_store import RuntimeConfigStore
         try:
-            raw = await exchange.fetch_balance()
-            # raw["free"] is {currency: amount} — filter out zero balances
-            free: dict[str, Any] = raw.get("free", {})
-            return {
-                cur: float(amt)
-                for cur, amt in free.items()
-                if amt and float(amt) > 0
-            }
-        except Exception as e:
-            logger.warning("Failed to fetch exchange balance: %s", e)
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
             return None
-        finally:
-            await exchange.close()
+
+        if not exchanges_list:
+            return None
+
+        merged: dict[str, float] = {}
+        any_success = False
+
+        for ex_info in exchanges_list:
+            if not ex_info.get("is_active", True):
+                continue
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if not exchange:
+                continue
+            try:
+                raw = await exchange.fetch_balance()
+                free: dict[str, Any] = raw.get("free", {})
+                for cur, amt in free.items():
+                    if amt and float(amt) > 0:
+                        merged[cur] = merged.get(cur, 0.0) + float(amt)
+                any_success = True
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch balance from %s: %s",
+                    ex_info.get("name", "?"), e,
+                )
+            finally:
+                await exchange.close()
+
+        return merged if any_success else None
 
     async def fetch_exchange_portfolio(self) -> dict[str, Any] | None:
         """Build a portfolio summary from real exchange balances.

@@ -373,7 +373,7 @@ export function TradingPage() {
             <span className="text-xs text-ct-text-muted uppercase">Cash</span>
           </div>
           <div className="text-lg font-semibold text-ct-text">
-            {formatUSD(portfolio?.cash_balance?.USDT ?? 0)}
+            {formatUSD(Object.values(portfolio?.cash_balance ?? {}).reduce((s, v) => s + v, 0))}
           </div>
         </Card>
         <Card>
@@ -414,7 +414,7 @@ export function TradingPage() {
             )}
             {(pairs || []).map(p => (
               <span key={p.symbol} className="inline-flex items-center gap-1 bg-ct-bg-hover rounded px-2 py-0.5 text-xs font-mono text-ct-text">
-                {p.symbol.replace('/USDT', '')}
+                {p.symbol}
                 <button
                   onClick={() => removePair.mutate(p.symbol)}
                   className="text-ct-text-dim hover:text-ct-red"
