@@ -486,13 +486,17 @@ class MarketDataProvider:
     @staticmethod
     async def _fetch_coinspot_balance_native(
         api_key: str, api_secret: str
-    ) -> dict[str, float] | None:
+    ) -> tuple[dict[str, float], dict[str, float]] | None:
         """Fetch CoinSpot balances using their native REST API.
 
         CoinSpot's ccxt integration is unreliable (GitHub #8175).
         Their native v2 read-only endpoint works with read-only API keys.
 
-        Returns ``{currency: amount}`` dict or ``None`` on failure.
+        Returns ``(amounts, aud_values)`` tuple where:
+        - ``amounts``: ``{currency: amount}`` (coin quantities)
+        - ``aud_values``: ``{currency: aud_balance}`` (CoinSpot's own AUD valuation)
+
+        Returns ``None`` on failure.
         """
         import aiohttp
 
@@ -528,19 +532,22 @@ class MarketDataProvider:
                 return None
 
             balances: dict[str, float] = {}
+            aud_values: dict[str, float] = {}
             for coin_entry in data.get("balances", []):
                 for currency, info in coin_entry.items():
                     bal = float(info.get("balance", 0))
                     # Skip tiny balances — CoinSpot returns dust for many coins
                     aud_bal = float(info.get("audbalance", 0))
                     if bal > 0 and aud_bal >= 0.01:
-                        balances[currency.upper()] = bal
+                        cur = currency.upper()
+                        balances[cur] = bal
+                        aud_values[cur] = aud_bal
 
             logger.info(
                 "CoinSpot native API: fetched %d balances (filtered dust), keys: %s",
                 len(balances), list(balances.keys())[:15],
             )
-            return balances
+            return balances, aud_values
         except Exception as e:
             logger.warning("CoinSpot native API failed: %s", e)
             return None
@@ -622,10 +629,11 @@ class MarketDataProvider:
                         vault = Vault(key)
                         api_key = vault.decrypt(entry.api_key_encrypted)
                         api_secret = vault.decrypt(entry.api_secret_encrypted)
-                        native_bal = await self._fetch_coinspot_balance_native(
+                        native_result = await self._fetch_coinspot_balance_native(
                             api_key, api_secret
                         )
-                        if native_bal:
+                        if native_result:
+                            native_bal, _aud_vals = native_result
                             for cur, amt in native_bal.items():
                                 merged[cur] = merged.get(cur, 0.0) + amt
                             any_success = True
@@ -849,6 +857,7 @@ class MarketDataProvider:
                     await exchange.close()
 
             # CoinSpot native API fallback
+            coinspot_aud_values: dict[str, float] | None = None
             needs_native = not ccxt_ok or ccxt_count == 0
             if needs_native and ex_name.lower() == "coinspot":
                 entry = store.get_exchange_entry(ex_info["id"])
@@ -861,22 +870,67 @@ class MarketDataProvider:
                         vault = Vault(key)
                         api_key = vault.decrypt(entry.api_key_encrypted)
                         api_secret = vault.decrypt(entry.api_secret_encrypted)
-                        native_bal = await self._fetch_coinspot_balance_native(
+                        native_result = await self._fetch_coinspot_balance_native(
                             api_key, api_secret,
                         )
-                        if native_bal:
+                        if native_result:
+                            native_bal, coinspot_aud_values = native_result
                             for cur, amt in native_bal.items():
                                 balances[cur] = balances.get(cur, 0.0) + amt
                     except Exception as e:
                         logger.warning("CoinSpot native fallback failed: %s", e)
 
             if balances:
-                ex_id_str = str(ex_info["id"])
-                logger.info(
-                    "[PORTFOLIO] Pricing %s (exchange_id=%s) with %d balances: %s",
-                    ex_name, ex_id_str, len(balances), list(balances.keys()),
-                )
-                portfolio = await self._price_balances(balances, exchange_id=ex_id_str)
+                # For CoinSpot: use the exchange's own AUD valuations directly
+                # instead of re-pricing each coin via _price_balances (which
+                # can fail for coins ccxt doesn't recognise and fall back to
+                # stale seed prices).
+                if coinspot_aud_values:
+                    aud_to_usd = _FIAT_TO_USD.get("AUD", 0.65)
+                    total_aud = sum(coinspot_aud_values.values())
+                    total_usd = total_aud * aud_to_usd
+                    non_stable = len(coinspot_aud_values)
+
+                    # Build per-coin log for diagnostics
+                    for cur, aud_val in sorted(
+                        coinspot_aud_values.items(),
+                        key=lambda x: x[1],
+                        reverse=True,
+                    ):
+                        usd_val = aud_val * aud_to_usd
+                        logger.info(
+                            "[PORTFOLIO]   %s: amount=%.8f, aud=$%.2f, usd=$%.2f, "
+                            "source=coinspot-native (exchange=%s)",
+                            cur,
+                            balances.get(cur, 0.0),
+                            aud_val,
+                            usd_val,
+                            ex_name,
+                        )
+
+                    portfolio: dict[str, Any] = {
+                        "cash_balance": {},
+                        "total_value_usd": round(total_usd, 2),
+                        "positions_value": round(total_usd, 2),
+                        "unrealized_pnl": 0.0,
+                        "realized_pnl": 0.0,
+                        "daily_pnl": 0.0,
+                        "open_positions": non_stable,
+                        "closed_positions": 0,
+                        "total_orders": 0,
+                    }
+                    logger.info(
+                        "[PORTFOLIO] CoinSpot native totals: AUD=$%.2f × %.4f = USD=$%.2f (%d coins)",
+                        total_aud, aud_to_usd, total_usd, non_stable,
+                    )
+                else:
+                    ex_id_str = str(ex_info["id"])
+                    logger.info(
+                        "[PORTFOLIO] Pricing %s (exchange_id=%s) with %d balances: %s",
+                        ex_name, ex_id_str, len(balances), list(balances.keys()),
+                    )
+                    portfolio = await self._price_balances(balances, exchange_id=ex_id_str)
+
                 results[ex_name] = portfolio
                 logger.info(
                     "Per-exchange portfolio for %s: $%.2f",
