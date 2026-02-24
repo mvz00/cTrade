@@ -20,7 +20,7 @@ from ctrade.core.models import Candle, Ticker
 
 logger = logging.getLogger(__name__)
 
-# Seed prices for simulated pairs
+# Seed prices for simulated pairs (multi-quote for demo)
 _SEED_PRICES: dict[str, float] = {
     "BTC/USDT": 67000.0,
     "ETH/USDT": 3500.0,
@@ -32,6 +32,15 @@ _SEED_PRICES: dict[str, float] = {
     "DOT/USDT": 7.20,
     "AVAX/USDT": 35.0,
     "LINK/USDT": 14.50,
+    # USDC pairs
+    "BTC/USDC": 67000.0,
+    "ETH/USDC": 3500.0,
+    # BTC pairs
+    "ETH/BTC": 0.052,
+    "SOL/BTC": 0.00216,
+    # AUD pairs (CoinSpot)
+    "BTC/AUD": 103000.0,
+    "ETH/AUD": 5400.0,
 }
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
@@ -66,42 +75,65 @@ class MarketDataProvider:
             cls._instance = None
 
     async def get_available_pairs(self) -> list[str]:
-        """Return available trading pairs from the configured exchange.
+        """Return available trading pairs from ALL configured exchanges.
 
-        Fetches all USDT-quoted spot pairs via ``load_markets()`` on first
-        call and caches the result.  Falls back to the simulated seed list
-        when no exchange is configured.
+        For each exchange, loads markets and filters by that exchange's
+        configured ``quote_currencies``.  Returns the sorted union of all
+        pairs.  Falls back to the simulated seed list when no exchange is
+        configured.
         """
         # Return cache if available
         if self._cached_exchange_pairs is not None:
             return self._cached_exchange_pairs
 
-        exchange = await self._create_ccxt_exchange()
-        if not exchange:
+        from ctrade.core.config_store import RuntimeConfigStore
+        try:
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
             return list(_SEED_PRICES.keys())
 
-        try:
-            markets = await exchange.load_markets()
-            pairs: list[str] = sorted(
-                symbol
-                for symbol, info in markets.items()
-                if (
-                    info.get("quote") == "USDT"
-                    and info.get("active", True)
-                    and info.get("spot", True)
-                )
+        if not exchanges_list:
+            return list(_SEED_PRICES.keys())
+
+        all_pairs: set[str] = set()
+
+        for ex_info in exchanges_list:
+            if not ex_info.get("is_active", True):
+                continue
+            entry = store.get_exchange_entry(ex_info["id"])
+            if not entry:
+                continue
+
+            quote_currencies = set(entry.quote_currencies)
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if not exchange:
+                continue
+            try:
+                markets = await exchange.load_markets()
+                for symbol, info in markets.items():
+                    if (
+                        info.get("quote") in quote_currencies
+                        and info.get("active", True)
+                        and info.get("spot", True)
+                    ):
+                        all_pairs.add(symbol)
+            except Exception as e:
+                logger.debug("Failed to load markets from %s: %s", entry.name, e)
+            finally:
+                await exchange.close()
+
+        if all_pairs:
+            pairs = sorted(all_pairs)
+            self._cached_exchange_pairs = pairs
+            logger.info(
+                "Loaded %d pairs from %d exchange(s)",
+                len(pairs), len(exchanges_list),
             )
-            if pairs:
-                self._cached_exchange_pairs = pairs
-                logger.info("Loaded %d USDT pairs from exchange", len(pairs))
-                return pairs
-            # Exchange returned no matching pairs — fall back
-            return list(_SEED_PRICES.keys())
-        except Exception as e:
-            logger.debug("Failed to load exchange markets: %s", e)
-            return list(_SEED_PRICES.keys())
-        finally:
-            await exchange.close()
+            return pairs
+
+        # No pairs from any exchange — fall back to simulated
+        return list(_SEED_PRICES.keys())
 
     def clear_pairs_cache(self) -> None:
         """Clear the cached exchange pairs (e.g. after exchange config change)."""
@@ -125,8 +157,11 @@ class MarketDataProvider:
             return candles
         return self._simulated_candles(symbol, timeframe, limit)
 
-    async def _create_ccxt_exchange(self) -> Any | None:
-        """Create an async ccxt exchange instance from the first configured exchange.
+    async def _create_ccxt_exchange(self, exchange_id: str | None = None) -> Any | None:
+        """Create an async ccxt exchange instance.
+
+        If ``exchange_id`` is provided, uses that specific exchange.
+        Otherwise, uses the first configured exchange (backward compatible).
 
         Returns the exchange object (caller must call ``await exchange.close()``),
         or ``None`` if no exchange is configured.
@@ -146,7 +181,10 @@ class MarketDataProvider:
                 return None
             vault = Vault(key)
 
-            entry = store.get_exchange_entry(exchanges[0]["id"])
+            if exchange_id:
+                entry = store.get_exchange_entry(exchange_id)
+            else:
+                entry = store.get_exchange_entry(exchanges[0]["id"])
             if not entry:
                 return None
 

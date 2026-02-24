@@ -292,12 +292,18 @@ export interface ExchangeAddRequest {
   api_key: string;
   api_secret: string;
   passphrase?: string;
+  quote_currencies?: string[];
+  max_portfolio_pct?: number;
+  risk_overrides?: Partial<RiskConfig>;
 }
 
 export interface ExchangeUpdateRequest {
   api_key?: string;
   api_secret?: string;
   passphrase?: string;
+  quote_currencies?: string[];
+  max_portfolio_pct?: number;
+  risk_overrides?: Partial<RiskConfig>;
 }
 
 export interface ExchangeInfo {
@@ -306,6 +312,9 @@ export interface ExchangeInfo {
   exchange_type: string;
   is_active: boolean;
   created_at: string;
+  quote_currencies: string[];
+  max_portfolio_pct: number;
+  risk_overrides: Partial<RiskConfig>;
 }
 
 export interface ExchangeTestResult {

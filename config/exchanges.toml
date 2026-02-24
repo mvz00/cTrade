@@ -37,3 +37,9 @@ exchange_type = "spot"
 rate_limit_rpm = 600
 default_fee_pct = 0.10
 supports_websocket = true
+
+[coinspot]
+exchange_type = "spot"
+rate_limit_rpm = 300
+default_fee_pct = 0.10
+supports_websocket = false

@@ -105,6 +105,9 @@ async def add_exchange(
         api_secret=body.api_secret,
         vault=vault,
         passphrase=body.passphrase,
+        quote_currencies=body.quote_currencies,
+        max_portfolio_pct=body.max_portfolio_pct or 1.0,
+        risk_overrides=body.risk_overrides,
     )
     # New exchange → refresh available pairs from it
     MarketDataProvider.get_instance().clear_pairs_cache()
@@ -127,13 +130,19 @@ async def update_exchange(
     body: ExchangeUpdateRequest,
     settings: AppSettings = Depends(get_app_settings),
 ) -> ExchangeResponse:
-    """Update API credentials for an existing exchange.
+    """Update credentials and settings for an existing exchange.
 
-    Only non-empty fields are re-encrypted and updated.
+    Only non-empty fields are re-encrypted/updated.
     """
-    if not body.api_key and not body.api_secret and body.passphrase is None:
+    has_creds = body.api_key or body.api_secret or body.passphrase is not None
+    has_settings = (
+        body.quote_currencies is not None
+        or body.max_portfolio_pct is not None
+        or body.risk_overrides is not None
+    )
+    if not has_creds and not has_settings:
         raise HTTPException(
-            status_code=422, detail="No credential fields provided"
+            status_code=422, detail="No fields provided to update"
         )
 
     vault = _get_vault(settings)
@@ -144,7 +153,13 @@ async def update_exchange(
         api_key=body.api_key,
         api_secret=body.api_secret,
         passphrase=body.passphrase,
+        quote_currencies=body.quote_currencies,
+        max_portfolio_pct=body.max_portfolio_pct,
+        risk_overrides=body.risk_overrides,
     )
+    # Quote currency change may affect available pairs
+    if body.quote_currencies is not None:
+        MarketDataProvider.get_instance().clear_pairs_cache()
     if result is None:
         raise HTTPException(status_code=404, detail="Exchange not found")
     return ExchangeResponse(**result)

@@ -359,12 +359,16 @@ class TradingOrchestrator:
         try:
             store = RuntimeConfigStore.get()
             strategy = store.get_strategy()
-            risk = store.get_risk()
             trading = store.get_trading()
+            # Determine active exchange for per-exchange risk
+            exchanges = store.list_exchanges()
+            self._active_exchange_id = exchanges[0]["id"] if exchanges else None
+            risk = store.get_effective_risk(self._active_exchange_id)
         except RuntimeError:
             strategy = {}
             risk = {}
             trading = {}
+            self._active_exchange_id = None
 
         entry_threshold = strategy.get("entry_confidence_threshold", 0.70)
         exit_threshold = strategy.get("exit_confidence_threshold", 0.30)
@@ -750,6 +754,17 @@ class TradingOrchestrator:
     ) -> None:
         """Open a new position (long or short) with standard position sizing."""
         total_value = portfolio["total_value_usd"]
+
+        # Apply per-exchange max portfolio allocation cap
+        active_ex_id = getattr(self, "_active_exchange_id", None)
+        if active_ex_id:
+            try:
+                entry = RuntimeConfigStore.get().get_exchange_entry(active_ex_id)
+                if entry and entry.max_portfolio_pct < 1.0:
+                    total_value = total_value * entry.max_portfolio_pct
+            except RuntimeError:
+                pass
+
         position_budget = min(max_order_usdt, total_value * max_position_pct)
         ticker = await market.get_ticker(pair)
         price = float(ticker.last_price)
