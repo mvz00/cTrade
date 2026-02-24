@@ -20,6 +20,8 @@ from ctrade.api.schemas.trading import (
     PlaceOrderRequest,
     PortfolioResponse,
     PositionResponse,
+    QuickBuyRequest,
+    QuickBuyResponse,
     TickerResponse,
 )
 from ctrade.exchange.engine_resolver import get_engine
@@ -100,6 +102,91 @@ async def place_order(body: PlaceOrderRequest) -> OrderResponse:
         price=body.price,
     )
     return OrderResponse(**engine._order_to_dict(order))
+
+
+@router.post("/quick-buy", response_model=QuickBuyResponse)
+async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
+    """Quick-buy: one-click market buy with auto-calculated quantity and SL/TP."""
+    from ctrade.core.config_store import RuntimeConfigStore
+
+    engine = get_engine()
+    market = MarketDataProvider.get_instance()
+    orch = TradingOrchestrator.get_instance()
+
+    # Get config defaults
+    try:
+        store = RuntimeConfigStore.get()
+        trading = store.get_trading()
+        risk = store.get_effective_risk(None)
+    except RuntimeError:
+        trading = {}
+        risk = {}
+
+    max_order_usdt = trading.get("max_order_usdt", 100.0)
+    stop_loss_pct = risk.get("default_stop_loss_pct", 0.03)
+    take_profit_pct = risk.get("default_take_profit_pct", 0.06)
+
+    amount_usdt = body.amount_usdt or max_order_usdt
+
+    # Get current price
+    ticker = await market.get_ticker(body.symbol)
+    price = float(ticker.last_price)
+    if price <= 0:
+        raise HTTPException(status_code=422, detail=f"Invalid price for {body.symbol}")
+
+    quantity = amount_usdt / price
+    sl_price = round(price * (1 - stop_loss_pct), 8)
+    tp_price = round(price * (1 + take_profit_pct), 8)
+
+    # Resolve exchange name
+    exchange_name = "paper"
+    try:
+        store = RuntimeConfigStore.get()
+        exchanges = store.list_exchanges()
+        if exchanges:
+            ex_entry = store.get_exchange_entry(exchanges[0]["id"])
+            if ex_entry:
+                exchange_name = ex_entry.name
+    except RuntimeError:
+        pass
+
+    order = await engine.place_order(
+        symbol=body.symbol,
+        side="buy",
+        order_type="market",
+        quantity=quantity,
+        price=price,
+        strategy_name="manual_quick_buy",
+        justification=f"Manual quick-buy from activity feed (${amount_usdt:.2f} USDT)",
+        stop_loss=sl_price,
+        take_profit=tp_price,
+        exchange_name=exchange_name,
+    )
+
+    order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
+
+    # Log activity
+    orch._log_activity(
+        "buy", body.symbol,
+        f"MANUAL BUY {body.symbol} {quantity:.6f} @ ${price:,.2f} → {order_status}",
+        {"quantity": quantity, "price": price, "amount_usdt": amount_usdt,
+         "stop_loss": sl_price, "take_profit": tp_price,
+         "strategy": "manual_quick_buy", "status": order_status},
+    )
+
+    if order_status == "rejected":
+        return QuickBuyResponse(
+            success=False, symbol=body.symbol, quantity=quantity,
+            price=price, amount_usdt=amount_usdt,
+            stop_loss=sl_price, take_profit=tp_price,
+            status=order_status, error=order.error_message,
+        )
+
+    return QuickBuyResponse(
+        success=True, order_id=str(order.id), symbol=body.symbol,
+        quantity=quantity, price=price, amount_usdt=amount_usdt,
+        stop_loss=sl_price, take_profit=tp_price, status=order_status,
+    )
 
 
 # ---- Positions ----

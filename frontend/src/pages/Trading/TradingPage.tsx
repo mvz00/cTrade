@@ -11,7 +11,7 @@ import {
   usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair,
   usePositions, useClosePosition, useCloseAllPositions,
   usePortfolio, useEngineStatus, useStartEngine, useStopEngine,
-  useResetPaperEngine, useActivityLog,
+  useResetPaperEngine, useQuickBuy, useActivityLog,
 } from '@/api/hooks/useTrading';
 import { formatUSD, formatAUD, formatNumber, formatTime } from '@/lib/formatters';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,7 +19,7 @@ import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
   Play, Square, Plus, X, Zap, Activity, Search,
   TrendingUp, TrendingDown, DollarSign, ShieldAlert,
-  Download, ChevronDown, ChevronUp, History, RotateCcw,
+  Download, ChevronDown, ChevronUp, History, RotateCcw, ShoppingCart,
 } from 'lucide-react';
 
 const USDT_TO_AUD = 1.55;
@@ -55,6 +55,27 @@ const TRADING_WS_EVENTS = [
   'risk.stop_loss_hit',
   'risk.take_profit_hit',
 ];
+
+/** Colored dot indicator for timeframe profit outlook. */
+function OutlookDot({ score, label }: { score: number; label: string }) {
+  let color: string;
+  let emoji: string;
+  if (score > 0.60) {
+    color = 'text-ct-green';
+    emoji = '🟢';
+  } else if (score < 0.40) {
+    color = 'text-ct-red';
+    emoji = '🔴';
+  } else {
+    color = 'text-yellow-400';
+    emoji = '🟡';
+  }
+  return (
+    <span className={`${color} cursor-help`} title={`${label}: ${(score * 100).toFixed(0)}%`}>
+      {emoji}
+    </span>
+  );
+}
 
 export function TradingPage() {
   // --- WebSocket for live updates ---
@@ -106,6 +127,7 @@ export function TradingPage() {
   const startEngine = useStartEngine();
   const stopEngine = useStopEngine();
   const resetPaper = useResetPaperEngine();
+  const quickBuy = useQuickBuy();
   const updateTrading = useUpdateTradingMode();
   const updateRisk = useUpdateRisk();
   const { toast } = useToast();
@@ -205,6 +227,20 @@ export function TradingPage() {
     link.click();
   }
 
+  function handleQuickBuy(symbol: string) {
+    if (!window.confirm(`Buy ${symbol} with default settings?`)) return;
+    quickBuy.mutate({ symbol }, {
+      onSuccess: (data) => {
+        if (data.success) {
+          toast(`Bought ${data.quantity.toFixed(6)} ${symbol} @ $${data.price.toFixed(2)}`, 'success');
+        } else {
+          toast(data.error || 'Quick buy failed', 'error');
+        }
+      },
+      onError: (e: any) => toast(e.message, 'error'),
+    });
+  }
+
   return (
     <div>
       <PageHeader
@@ -239,26 +275,61 @@ export function TradingPage() {
             {isRunning ? 'Waiting for first tick…' : 'Start auto-trading to see live activity'}
           </p>
         ) : (
-          <div className="space-y-0.5 max-h-40 overflow-y-auto font-mono text-xs">
-            {activityData.map((entry, i) => (
-              <div key={`${entry.time}-${i}`} className="flex items-start gap-2 py-0.5 px-2 rounded hover:bg-ct-bg-hover">
-                <span className="text-ct-text-dim whitespace-nowrap">
-                  {formatTime(entry.time)}
-                </span>
-                <span className="w-4 text-center flex-shrink-0">
-                  {ACTIVITY_ICONS[entry.type] ?? '•'}
-                </span>
-                <span className={`uppercase text-[10px] font-bold w-10 flex-shrink-0 ${ACTIVITY_COLORS[entry.type] ?? 'text-ct-text-muted'}`}>
-                  {entry.type}
-                </span>
-                <span className="text-ct-text-muted flex-shrink-0 w-20">
-                  {entry.pair || '—'}
-                </span>
-                <span className={ACTIVITY_COLORS[entry.type] ?? 'text-ct-text'}>
-                  {entry.message}
-                </span>
-              </div>
-            ))}
+          <div className="space-y-0.5 max-h-48 overflow-y-auto font-mono text-xs">
+            {activityData.map((entry, i) => {
+              const isSignal = entry.type === 'signal';
+              const outlook1h = entry.details?.outlook_1h as number | undefined;
+              const outlook24h = entry.details?.outlook_24h as number | undefined;
+              const outlook7d = entry.details?.outlook_7d as number | undefined;
+              const hasOutlook = isSignal && outlook1h !== undefined;
+              const canBuy = isSignal && entry.pair && entry.pair !== 'ALL';
+              const cashBalance = Object.values(portfolio?.cash_balance ?? {}).reduce((s, v) => s + v, 0);
+
+              return (
+                <div key={`${entry.time}-${i}`} className="flex items-center gap-2 py-0.5 px-2 rounded hover:bg-ct-bg-hover">
+                  <span className="text-ct-text-dim whitespace-nowrap">
+                    {formatTime(entry.time)}
+                  </span>
+                  <span className="w-4 text-center flex-shrink-0">
+                    {ACTIVITY_ICONS[entry.type] ?? '•'}
+                  </span>
+                  <span className={`uppercase text-[10px] font-bold w-10 flex-shrink-0 ${ACTIVITY_COLORS[entry.type] ?? 'text-ct-text-muted'}`}>
+                    {entry.type}
+                  </span>
+                  <span className="text-ct-text-muted flex-shrink-0 w-20">
+                    {entry.pair || '—'}
+                  </span>
+
+                  {/* Timeframe outlook indicators (1h / 24h / 7d) */}
+                  {hasOutlook ? (
+                    <span className="flex items-center gap-0.5 flex-shrink-0 text-[10px]" title="Profit outlook: 1h · 24h · 7d">
+                      <OutlookDot score={outlook1h!} label="1h outlook" />
+                      <OutlookDot score={outlook24h ?? outlook1h!} label="24h outlook" />
+                      <OutlookDot score={outlook7d ?? outlook1h!} label="7d outlook" />
+                    </span>
+                  ) : (
+                    <span className="w-[42px] flex-shrink-0" />
+                  )}
+
+                  <span className={`flex-1 truncate ${ACTIVITY_COLORS[entry.type] ?? 'text-ct-text'}`}>
+                    {entry.message}
+                  </span>
+
+                  {/* Quick-buy button for signal entries */}
+                  {canBuy && (
+                    <button
+                      onClick={() => handleQuickBuy(entry.pair)}
+                      disabled={quickBuy.isPending || cashBalance <= 0}
+                      className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-ct-green/20 text-ct-green hover:bg-ct-green/30 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title={cashBalance <= 0 ? 'No cash available' : `Quick buy ${entry.pair}`}
+                    >
+                      <ShoppingCart size={10} className="inline mr-0.5" />
+                      Buy
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Card>
