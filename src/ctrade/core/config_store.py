@@ -128,6 +128,82 @@ class RuntimeConfigStore:
 
     # ---- Persistence ----
 
+    def _save_to_db(self) -> None:
+        """Persist current state to the runtime_config DB table (fire-and-forget).
+
+        Uses the same base64 serialization as ``_save_to_disk`` so encrypted
+        exchange/feed credentials round-trip cleanly through JSONB.
+        """
+        try:
+            from ctrade.db.persistence import fire_and_forget, is_db_ready
+
+            if not is_db_ready():
+                return
+
+            # Snapshot data under lock
+            with self._data_lock:
+                trading = dict(self._trading)
+                strategy = dict(self._strategy)
+                risk = dict(self._risk)
+
+                exchanges_data: list[dict[str, Any]] = []
+                for ex in self._exchanges:
+                    ex_dict: dict[str, Any] = {
+                        "id": ex.id,
+                        "name": ex.name,
+                        "exchange_type": ex.exchange_type,
+                        "api_key_encrypted": base64.b64encode(ex.api_key_encrypted).decode(),
+                        "api_secret_encrypted": base64.b64encode(ex.api_secret_encrypted).decode(),
+                        "passphrase_encrypted": (
+                            base64.b64encode(ex.passphrase_encrypted).decode()
+                            if ex.passphrase_encrypted
+                            else None
+                        ),
+                        "is_active": ex.is_active,
+                        "created_at": ex.created_at.isoformat(),
+                    }
+                    exchanges_data.append(ex_dict)
+
+                feed_creds_data: dict[str, dict[str, str]] = {}
+                for conn_name, fields in self._feed_credentials.items():
+                    feed_creds_data[conn_name] = {
+                        k: base64.b64encode(v).decode() for k, v in fields.items()
+                    }
+
+            # Build the rows to upsert
+            rows = {
+                "trading": trading,
+                "strategy": strategy,
+                "risk": risk,
+                "exchanges": exchanges_data,
+                "feed_credentials": feed_creds_data,
+            }
+
+            async def _do_save() -> None:
+                from ctrade.db.persistence import run_db_operation
+
+                async def _upsert(session: Any, _resolver: Any) -> None:
+                    from sqlalchemy.dialects.postgresql import insert as pg_insert
+                    from ctrade.db.models import RuntimeConfigModel
+
+                    for key, value in rows.items():
+                        stmt = (
+                            pg_insert(RuntimeConfigModel)
+                            .values(key=key, value=value, updated_by="config_store")
+                            .on_conflict_do_update(
+                                index_elements=["key"],
+                                set_={"value": value, "updated_by": "config_store"},
+                            )
+                        )
+                        await session.execute(stmt)
+
+                await run_db_operation(_upsert, description="persist RuntimeConfig to DB")
+
+            fire_and_forget(_do_save())
+
+        except Exception:
+            logger.debug("Failed to persist config to DB", exc_info=True)
+
     def _save_to_disk(self) -> None:
         """Persist current state to JSON file.  Never raises — logs errors."""
         try:
@@ -282,6 +358,92 @@ class RuntimeConfigStore:
         except Exception:
             logger.exception("Failed to load config state from disk — using defaults")
 
+    async def hydrate_from_db(self) -> None:
+        """Restore config state from the ``runtime_config`` DB table.
+
+        Called once at startup after the DB is available.  Overlays on top
+        of whatever ``_load_from_disk()`` already set — DB values take
+        precedence because the local file is lost on Railway redeploys
+        but the DB survives.
+        """
+        from ctrade.db.persistence import is_db_ready, run_db_operation
+
+        if not is_db_ready():
+            logger.info("DB not available — RuntimeConfigStore using disk/defaults only")
+            return
+
+        async def _load(session: Any, _resolver: Any) -> dict[str, Any]:
+            from sqlalchemy import select
+            from ctrade.db.models import RuntimeConfigModel
+
+            stmt = select(RuntimeConfigModel)
+            rows = (await session.execute(stmt)).scalars().all()
+            return {r.key: r.value for r in rows}
+
+        loaded = await run_db_operation(_load, description="hydrate RuntimeConfigStore")
+        if not loaded:
+            logger.debug("No runtime config found in DB — using disk/defaults")
+            return
+
+        with self._data_lock:
+            if "trading" in loaded and isinstance(loaded["trading"], dict):
+                self._trading.update(loaded["trading"])
+
+            if "strategy" in loaded and isinstance(loaded["strategy"], dict):
+                self._strategy.update(loaded["strategy"])
+
+            if "risk" in loaded and isinstance(loaded["risk"], dict):
+                self._risk.update(loaded["risk"])
+
+            if "exchanges" in loaded and isinstance(loaded["exchanges"], list):
+                restored: list[ExchangeEntry] = []
+                for i, ex_data in enumerate(loaded["exchanges"]):
+                    try:
+                        passphrase_enc = ex_data.get("passphrase_encrypted")
+                        entry = ExchangeEntry(
+                            id=ex_data["id"],
+                            name=ex_data["name"],
+                            exchange_type=ex_data["exchange_type"],
+                            api_key_encrypted=base64.b64decode(ex_data["api_key_encrypted"]),
+                            api_secret_encrypted=base64.b64decode(
+                                ex_data["api_secret_encrypted"]
+                            ),
+                            passphrase_encrypted=(
+                                base64.b64decode(passphrase_enc) if passphrase_enc else None
+                            ),
+                            is_active=ex_data.get("is_active", True),
+                            created_at=datetime.fromisoformat(ex_data["created_at"]),
+                        )
+                        restored.append(entry)
+                    except Exception:
+                        logger.exception(
+                            "Failed to restore exchange entry %d from DB — skipping", i
+                        )
+                self._exchanges = restored
+
+            if "feed_credentials" in loaded and isinstance(loaded["feed_credentials"], dict):
+                restored_creds: dict[str, dict[str, bytes]] = {}
+                for conn_name, fields in loaded["feed_credentials"].items():
+                    try:
+                        restored_creds[conn_name] = {
+                            k: base64.b64decode(v) for k, v in fields.items()
+                        }
+                    except Exception:
+                        logger.exception(
+                            "Failed to restore feed credentials for %s from DB — skipping",
+                            conn_name,
+                        )
+                self._feed_credentials = restored_creds
+
+        logger.info(
+            "Restored config from DB (%d exchanges, %d feed credentials)",
+            len(self._exchanges),
+            len(self._feed_credentials),
+        )
+
+        # Re-save to disk so the local file is in sync for intra-deploy restarts
+        self._save_to_disk()
+
     # ---- Trading config ----
 
     def get_trading(self) -> dict[str, Any]:
@@ -293,6 +455,7 @@ class RuntimeConfigStore:
             self._trading.update(updates)
             result = dict(self._trading)
         self._save_to_disk()
+        self._save_to_db()
         return result
 
     # ---- Strategy config ----
@@ -321,6 +484,7 @@ class RuntimeConfigStore:
             self._strategy.update(updates)
             result = dict(self._strategy)
         self._save_to_disk()
+        self._save_to_db()
         return result
 
     # ---- Risk config ----
@@ -334,6 +498,7 @@ class RuntimeConfigStore:
             self._risk.update(updates)
             result = dict(self._risk)
         self._save_to_disk()
+        self._save_to_db()
         return result
 
     # ---- Feed credential management ----
@@ -367,6 +532,7 @@ class RuntimeConfigStore:
             if encrypted:
                 self._feed_credentials[connection_name] = encrypted
         self._save_to_disk()
+        self._save_to_db()
 
     def get_feed_credential_decrypted(
         self,
@@ -407,6 +573,7 @@ class RuntimeConfigStore:
             self._exchanges.append(entry)
             result = entry.to_public_dict()
         self._save_to_disk()
+        self._save_to_db()
         return result
 
     def update_exchange(
@@ -435,6 +602,7 @@ class RuntimeConfigStore:
                 entry.passphrase_encrypted = vault.encrypt(passphrase) if passphrase else None
             result = entry.to_public_dict()
         self._save_to_disk()
+        self._save_to_db()
         return result
 
     def get_exchange_entry(self, exchange_id: str) -> ExchangeEntry | None:
@@ -451,4 +619,5 @@ class RuntimeConfigStore:
             removed = len(self._exchanges) < before
         if removed:
             self._save_to_disk()
+            self._save_to_db()
         return removed
