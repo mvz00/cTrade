@@ -424,7 +424,7 @@ class MarketDataProvider:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    url, data=body, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+                    url, data=body, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status != 200:
                         logger.warning(
@@ -441,11 +441,14 @@ class MarketDataProvider:
             for coin_entry in data.get("balances", []):
                 for currency, info in coin_entry.items():
                     bal = float(info.get("balance", 0))
-                    if bal > 0:
+                    # Skip tiny balances — CoinSpot returns dust for many coins
+                    aud_bal = float(info.get("audbalance", 0))
+                    if bal > 0 and aud_bal >= 0.01:
                         balances[currency.upper()] = bal
 
             logger.info(
-                "CoinSpot native API: fetched %d non-zero balances", len(balances)
+                "CoinSpot native API: fetched %d balances (filtered dust), keys: %s",
+                len(balances), list(balances.keys())[:15],
             )
             return balances
         except Exception as e:
@@ -588,52 +591,64 @@ class MarketDataProvider:
         positions_value = 0.0
         non_stable_count = 0
 
+        # ------------------------------------------------------------------
+        # Pass 1: Fast valuation using seed prices (no API calls).
+        # Identifies which currencies are significant (> $1 estimated).
+        # ------------------------------------------------------------------
+        crypto_holdings: list[tuple[str, float, float]] = []  # (currency, amount, est_usd)
         for currency, amount in balances.items():
             if currency in _CASH_CURRENCIES:
-                # Stablecoins count as $1, fiat uses approximate rate
                 rate = _FIAT_TO_USD.get(currency, 1.0)
                 cash_value += amount * rate
             else:
-                # Try to convert to USD via real exchange ticker
-                symbol = f"{currency}/USDT"
+                # Quick estimate from seed prices
+                seed_price = _SEED_PRICES.get(
+                    f"{currency}/USDT",
+                    _SEED_PRICES.get(
+                        f"{currency}/USD",
+                        _SEED_PRICES.get(f"{currency}/AUD", 0) * _FIAT_TO_USD.get("AUD", 0.65),
+                    ),
+                )
+                est_usd = amount * seed_price if seed_price > 0 else 0.0
+                if est_usd >= 0.01:  # skip dust
+                    crypto_holdings.append((currency, amount, est_usd))
+
+        # Sort by estimated value descending so we price the biggest first
+        crypto_holdings.sort(key=lambda x: x[2], reverse=True)
+        logger.info(
+            "Portfolio: %d crypto holdings above dust, top: %s",
+            len(crypto_holdings),
+            [(c, f"~${v:.2f}") for c, _, v in crypto_holdings[:5]],
+        )
+
+        # ------------------------------------------------------------------
+        # Pass 2: Get real prices for the top holdings only (max 10 live
+        # ticker lookups to keep response fast). Use seed price for the rest.
+        # ------------------------------------------------------------------
+        _MAX_LIVE_LOOKUPS = 10
+
+        for i, (currency, amount, est_usd) in enumerate(crypto_holdings):
+            usd_value = est_usd  # default to seed estimate
+
+            if i < _MAX_LIVE_LOOKUPS:
+                # Try real ticker for top holdings
                 try:
-                    ticker = await self._try_ccxt_ticker(symbol)
+                    ticker = await self._try_ccxt_ticker(f"{currency}/USDT")
                     if ticker is None:
                         ticker = await self._try_ccxt_ticker(f"{currency}/USD")
                     if ticker is None:
                         ticker = await self._try_ccxt_ticker(f"{currency}/AUD")
                     if ticker is not None:
                         price = float(ticker.last_price)
-                        # AUD ticker → convert to USD
                         if ticker.pair_symbol.endswith("/AUD"):
                             price *= _FIAT_TO_USD.get("AUD", 0.65)
                         usd_value = amount * price
-                    else:
-                        # Fallback: use seed price for approximate valuation
-                        seed_price = _SEED_PRICES.get(
-                            f"{currency}/USDT",
-                            _SEED_PRICES.get(f"{currency}/USD", 0),
-                        )
-                        if seed_price > 0:
-                            usd_value = amount * seed_price
-                            logger.info(
-                                "Using seed price for %s (%.8f × $%.2f = $%.2f)",
-                                currency, amount, seed_price, usd_value,
-                            )
-                        else:
-                            logger.debug(
-                                "No price for %s (amount=%.8f), skipping",
-                                currency, amount,
-                            )
-                            continue
-
-                    # Skip dust (< $0.01)
-                    if usd_value < 0.01:
-                        continue
-                    positions_value += usd_value
-                    non_stable_count += 1
                 except Exception:
-                    logger.debug("Could not price %s, skipping", symbol)
+                    pass  # keep seed estimate
+
+            if usd_value >= 0.01:
+                positions_value += usd_value
+                non_stable_count += 1
 
         total_value = cash_value + positions_value
 
