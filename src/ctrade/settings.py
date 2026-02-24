@@ -22,7 +22,7 @@ import os
 from functools import lru_cache
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -160,6 +160,25 @@ class AppSettings(BaseSettings):
         if port:
             return int(port)
         return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_single_underscore_auth(cls, values: dict) -> dict:
+        """Accept CTRADE_AUTH_ENABLED (single underscore) as a fallback.
+
+        Pydantic-settings with ``env_nested_delimiter="__"`` requires the
+        double-underscore form ``CTRADE_AUTH__ENABLED``.  Many users
+        naturally type the single-underscore variant, which is silently
+        ignored.  This validator bridges that gap so both forms work.
+        """
+        if isinstance(values, dict):
+            auth = values.get("auth") or {}
+            if isinstance(auth, dict) and not auth.get("enabled"):
+                env_val = os.environ.get("CTRADE_AUTH_ENABLED", "").lower()
+                if env_val in ("true", "1", "yes"):
+                    auth["enabled"] = True
+                    values["auth"] = auth
+        return values
 
     # Encryption key for API credential storage
     encryption_key: SecretStr = Field(default=SecretStr(""))

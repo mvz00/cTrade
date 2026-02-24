@@ -14,7 +14,8 @@ import { Badge } from '@/components/ui/Badge';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
 import { Plug, Plus, Trash2, Wifi, Pencil, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 export function ExchangeSection() {
   const { data: exchanges = [] } = useExchanges();
@@ -24,8 +25,18 @@ export function ExchangeSection() {
   const deleteExchange = useDeleteExchange();
   const testExchange = useTestExchange();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [showForm, setShowForm] = useState(false);
+
+  // Auto-open "Add Exchange" form when navigated from Connections page
+  useEffect(() => {
+    if (searchParams.get('addExchange') === 'true') {
+      setShowForm(true);
+      searchParams.delete('addExchange');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');

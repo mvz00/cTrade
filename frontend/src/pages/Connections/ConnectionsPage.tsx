@@ -219,7 +219,7 @@ export function ConnectionsPage() {
                   {showManageButton && (
                     <Button
                       variant="ghost"
-                      onClick={() => navigate(ROUTES.CONFIGURATION)}
+                      onClick={() => navigate(`${ROUTES.CONFIGURATION}?addExchange=true`)}
                     >
                       <ExternalLink size={14} />
                       Manage
