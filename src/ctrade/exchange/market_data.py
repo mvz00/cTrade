@@ -303,7 +303,12 @@ class MarketDataProvider:
         cached = self._ticker_cache.get(cache_key)
         if cached is not None:
             ticker, ts = cached
-            if time.time() - ts < self._TICKER_CACHE_TTL:
+            age = time.time() - ts
+            if age < self._TICKER_CACHE_TTL:
+                logger.info(
+                    "[PRICING] %s CACHE HIT (key=%s, age=%.0fs, price=%s)",
+                    symbol, cache_key, age, ticker.last_price,
+                )
                 return ticker
 
         from ctrade.core.config_store import RuntimeConfigStore
@@ -334,11 +339,23 @@ class MarketDataProvider:
                     data = await exchange.fetch_ticker(symbol)
                     result = _make_ticker(data)
                     self._ticker_cache[cache_key] = (result, time.time())
+                    logger.info(
+                        "[PRICING] %s via SCOPED exchange_id=%s → price=%s",
+                        symbol, exchange_id, result.last_price,
+                    )
                     return result
-                except Exception:
-                    pass  # fall through to AUD fallback
+                except Exception as exc:
+                    logger.info(
+                        "[PRICING] %s SCOPED exchange_id=%s ccxt FAILED: %s",
+                        symbol, exchange_id, exc,
+                    )
                 finally:
                     await exchange.close()
+            else:
+                logger.info(
+                    "[PRICING] %s SCOPED exchange_id=%s — ccxt exchange creation FAILED",
+                    symbol, exchange_id,
+                )
         else:
             # ----- Unscoped: iterate ALL active exchanges -----
             exchanges_list = store.list_exchanges()
@@ -355,6 +372,10 @@ class MarketDataProvider:
                     data = await exchange.fetch_ticker(symbol)
                     result = _make_ticker(data)
                     self._ticker_cache[cache_key] = (result, time.time())
+                    logger.info(
+                        "[PRICING] %s via UNSCOPED exchange=%s → price=%s",
+                        symbol, ex_info.get("name", "?"), result.last_price,
+                    )
                     return result
                 except Exception:
                     pass  # try next exchange
@@ -372,9 +393,16 @@ class MarketDataProvider:
                 ticker = await self._fetch_coinspot_price_native(symbol)
                 if ticker:
                     self._ticker_cache[cache_key] = (ticker, time.time())
+                    logger.info(
+                        "[PRICING] %s via CoinSpot NATIVE fallback → price=%s (AUD)",
+                        symbol, ticker.last_price,
+                    )
                     return ticker
 
-        logger.debug("ccxt ticker fetch failed for %s (exchange_id=%s)", symbol, exchange_id)
+        logger.info(
+            "[PRICING] %s FAILED all sources (exchange_id=%s) — returning None",
+            symbol, exchange_id,
+        )
         return None
 
     @staticmethod
@@ -664,8 +692,14 @@ class MarketDataProvider:
         # ------------------------------------------------------------------
         _MAX_LIVE_LOOKUPS = 10
 
+        logger.info(
+            "[PORTFOLIO] _price_balances called: exchange_id=%s, %d crypto holdings, cash=$%.2f",
+            exchange_id, len(crypto_holdings), cash_value,
+        )
+
         for i, (currency, amount, est_usd) in enumerate(crypto_holdings):
             usd_value = est_usd
+            price_source = "seed"
             if i < _MAX_LIVE_LOOKUPS:
                 try:
                     ticker = await self._try_ccxt_ticker(f"{currency}/USDT", exchange_id)
@@ -675,17 +709,30 @@ class MarketDataProvider:
                         ticker = await self._try_ccxt_ticker(f"{currency}/AUD", exchange_id)
                     if ticker is not None:
                         price = float(ticker.last_price)
+                        price_source = f"live:{ticker.pair_symbol}"
                         if ticker.pair_symbol.endswith("/AUD"):
                             price *= _FIAT_TO_USD.get("AUD", 0.65)
+                            price_source += f"×AUD({_FIAT_TO_USD.get('AUD', 0.65)})"
                         usd_value = amount * price
                 except Exception:
                     pass
+            else:
+                price_source = "seed(over-limit)"
+
+            logger.info(
+                "[PORTFOLIO]   %s: amount=%.8f, usd=$%.2f, source=%s (exchange_id=%s)",
+                currency, amount, usd_value, price_source, exchange_id,
+            )
 
             if usd_value >= 0.01:
                 positions_value += usd_value
                 non_stable_count += 1
 
         total_value = cash_value + positions_value
+        logger.info(
+            "[PORTFOLIO] _price_balances result: total=$%.2f (cash=$%.2f + positions=$%.2f), exchange_id=%s",
+            total_value, cash_value, positions_value, exchange_id,
+        )
 
         cash_bal_usd: dict[str, float] = {}
         for currency, amount in balances.items():
@@ -824,7 +871,12 @@ class MarketDataProvider:
                         logger.warning("CoinSpot native fallback failed: %s", e)
 
             if balances:
-                portfolio = await self._price_balances(balances, exchange_id=str(ex_info["id"]))
+                ex_id_str = str(ex_info["id"])
+                logger.info(
+                    "[PORTFOLIO] Pricing %s (exchange_id=%s) with %d balances: %s",
+                    ex_name, ex_id_str, len(balances), list(balances.keys()),
+                )
+                portfolio = await self._price_balances(balances, exchange_id=ex_id_str)
                 results[ex_name] = portfolio
                 logger.info(
                     "Per-exchange portfolio for %s: $%.2f",
