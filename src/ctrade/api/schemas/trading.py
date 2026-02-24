@@ -50,6 +50,7 @@ class OrderResponse(BaseModel):
 class PositionResponse(BaseModel):
     id: str
     pair_symbol: str
+    exchange_name: str = ""
     side: str
     status: str
     entry_price: float
