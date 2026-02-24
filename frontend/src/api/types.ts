@@ -117,6 +117,7 @@ export interface Order {
 export interface Position {
   id: string;
   pair_symbol: string;
+  exchange_name?: string;
   side: string;
   status: string;
   entry_price: number;

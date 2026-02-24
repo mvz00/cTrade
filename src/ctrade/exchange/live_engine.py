@@ -655,6 +655,7 @@ class LiveEngine:
         return {
             "id": str(p.id),
             "pair_symbol": p.pair_symbol,
+            "exchange_name": p.exchange_name,
             "side": p.side,
             "status": p.status,
             "entry_price": float(p.entry_price),

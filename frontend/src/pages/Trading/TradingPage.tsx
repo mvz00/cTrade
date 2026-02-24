@@ -520,6 +520,7 @@ export function TradingPage() {
                 <thead>
                   <tr className="border-b border-ct-border text-ct-text-muted text-left">
                     <th className="pb-2">Pair</th>
+                    <th className="pb-2">Exchange</th>
                     <th className="pb-2">Side</th>
                     <th className="pb-2">Qty</th>
                     <th className="pb-2">Entry</th>
@@ -533,6 +534,7 @@ export function TradingPage() {
                     <Fragment key={p.id}>
                       <tr className="border-b border-ct-border/50">
                         <td className="py-2 font-mono">{p.pair_symbol}</td>
+                        <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
                         <td>
                           <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
                         </td>
@@ -563,7 +565,7 @@ export function TradingPage() {
                       </tr>
                       {p.justification && (
                         <tr>
-                          <td colSpan={7} className="pb-2 px-1">
+                          <td colSpan={8} className="pb-2 px-1">
                             <p className="text-xs text-ct-text-dim italic leading-relaxed">
                               {p.justification}
                             </p>
@@ -609,6 +611,7 @@ export function TradingPage() {
                   <thead className="sticky top-0 bg-ct-card">
                     <tr className="border-b border-ct-border text-ct-text-muted text-left">
                       <th className="pb-2">Pair</th>
+                      <th className="pb-2">Exchange</th>
                       <th className="pb-2">Side</th>
                       <th className="pb-2">Entry</th>
                       <th className="pb-2">Exit</th>
@@ -622,6 +625,7 @@ export function TradingPage() {
                     {(closedPositions || []).map(p => (
                       <tr key={p.id} className="border-b border-ct-border/50">
                         <td className="py-1.5 font-mono">{p.pair_symbol}</td>
+                        <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
                         <td>
                           <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
                         </td>
