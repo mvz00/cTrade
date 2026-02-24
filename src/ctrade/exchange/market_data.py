@@ -652,8 +652,21 @@ class MarketDataProvider:
 
         total_value = cash_value + positions_value
 
+        # Build cash_balance with only actual cash/stablecoin currencies
+        # (USD-converted values so the frontend can sum them directly)
+        cash_bal_usd: dict[str, float] = {}
+        for currency, amount in balances.items():
+            if currency in _CASH_CURRENCIES:
+                rate = _FIAT_TO_USD.get(currency, 1.0)
+                cash_bal_usd[currency] = round(amount * rate, 2)
+
+        logger.info(
+            "fetch_exchange_portfolio: total=$%.2f (cash=$%.2f + positions=$%.2f), %d crypto holdings",
+            total_value, cash_value, positions_value, non_stable_count,
+        )
+
         return {
-            "cash_balance": balances,
+            "cash_balance": cash_bal_usd,
             "total_value_usd": round(total_value, 2),
             "positions_value": round(positions_value, 2),
             "unrealized_pnl": 0.0,
