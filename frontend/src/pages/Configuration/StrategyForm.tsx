@@ -1,11 +1,29 @@
 import { useStrategyConfig, useUpdateStrategy } from '@/api/hooks/useConfig';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { NumberInput } from '@/components/ui/NumberInput';
+import { RangeSlider } from '@/components/ui/RangeSlider';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { Sliders } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
+const RISK_MARKERS = [
+  { value: 1, label: '1' },
+  { value: 3, label: '3' },
+  { value: 5, label: '5' },
+  { value: 7, label: '7' },
+  { value: 10, label: '10' },
+];
+
+/** Derive entry/exit thresholds from risk appetite (mirrors backend formula). */
+function deriveThresholds(appetite: number) {
+  const halfZone = 0.10 - (appetite - 1) * 0.01;
+  return {
+    entry: +(0.50 + halfZone).toFixed(2),
+    exit: +(0.50 - halfZone).toFixed(2),
+  };
+}
 
 export function StrategyForm() {
   const { data: strategy } = useStrategyConfig();
@@ -21,8 +39,7 @@ export function StrategyForm() {
   const [social, setSocial] = useState(8);
   const [strategyMode, setStrategyMode] = useState('long_only');
   const [shortMinChange, setShortMinChange] = useState(2.0);
-  const [entry, setEntry] = useState(55);
-  const [exit, setExit] = useState(45);
+  const [riskAppetite, setRiskAppetite] = useState(5);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -36,14 +53,14 @@ export function StrategyForm() {
       setSocial(Math.round(strategy.social_velocity_weight * 100));
       setStrategyMode(strategy.strategy_mode || 'long_only');
       setShortMinChange(strategy.short_min_1h_change_pct ?? 2.0);
-      setEntry(Math.round(strategy.entry_confidence_threshold * 100));
-      setExit(Math.round(strategy.exit_confidence_threshold * 100));
+      setRiskAppetite(strategy.risk_appetite ?? 5);
       setDirty(false);
     }
   }, [strategy]);
 
   const weightSum = tech + sent + onchain + deriv + mktSent + cvd + social;
   const weightError = weightSum !== 100 ? `Weights sum to ${weightSum}%, must be 100%` : '';
+  const thresholds = deriveThresholds(riskAppetite);
 
   function handleSave() {
     if (weightError) return;
@@ -58,8 +75,7 @@ export function StrategyForm() {
         social_velocity_weight: social / 100,
         strategy_mode: strategyMode,
         short_min_1h_change_pct: shortMinChange,
-        entry_confidence_threshold: entry / 100,
-        exit_confidence_threshold: exit / 100,
+        risk_appetite: riskAppetite,
       },
       {
         onSuccess: () => {
@@ -110,6 +126,21 @@ export function StrategyForm() {
             suffix="%"
           />
         )}
+
+        <div className="border-t border-ct-border pt-3 mt-3">
+          <p className="text-xs font-medium text-ct-text-dim mb-2">Risk Appetite</p>
+        </div>
+
+        <RangeSlider
+          label="Risk Appetite"
+          value={riskAppetite}
+          onChange={setAndDirty(setRiskAppetite)}
+          min={1}
+          max={10}
+          step={1}
+          markers={RISK_MARKERS}
+          info={`Entry threshold: ${(thresholds.entry * 100).toFixed(0)}% \u00b7 Exit threshold: ${(thresholds.exit * 100).toFixed(0)}%`}
+        />
 
         <div className="border-t border-ct-border pt-3 mt-3">
           <p className="text-xs font-medium text-ct-text-dim mb-2">Signal Weights</p>
@@ -179,29 +210,6 @@ export function StrategyForm() {
           suffix="%"
           error={weightError || undefined}
         />
-
-        <div className="border-t border-ct-border pt-3 mt-3">
-          <p className="text-xs font-medium text-ct-text-dim mb-2">Confidence Thresholds</p>
-        </div>
-
-        <NumberInput
-          label="Entry Confidence"
-          value={entry}
-          onChange={setAndDirty(setEntry)}
-          min={0}
-          max={100}
-          step={5}
-          suffix="%"
-        />
-        <NumberInput
-          label="Exit Confidence"
-          value={exit}
-          onChange={setAndDirty(setExit)}
-          min={0}
-          max={100}
-          step={5}
-          suffix="%"
-        />
       </div>
 
       <div className="mt-4 flex gap-2">
@@ -225,8 +233,7 @@ export function StrategyForm() {
                 setSocial(Math.round(strategy.social_velocity_weight * 100));
                 setStrategyMode(strategy.strategy_mode || 'long_only');
                 setShortMinChange(strategy.short_min_1h_change_pct ?? 2.0);
-                setEntry(Math.round(strategy.entry_confidence_threshold * 100));
-                setExit(Math.round(strategy.exit_confidence_threshold * 100));
+                setRiskAppetite(strategy.risk_appetite ?? 5);
                 setDirty(false);
               }
             }}

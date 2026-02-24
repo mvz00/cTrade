@@ -89,6 +89,7 @@ class RuntimeConfigStore:
             "social_velocity_weight": settings.strategy.social_velocity_weight,
             "strategy_mode": settings.strategy.strategy_mode,
             "short_min_1h_change_pct": settings.strategy.short_min_1h_change_pct,
+            "risk_appetite": settings.strategy.risk_appetite,
             "entry_confidence_threshold": settings.strategy.entry_confidence_threshold,
             "exit_confidence_threshold": settings.strategy.exit_confidence_threshold,
         }
