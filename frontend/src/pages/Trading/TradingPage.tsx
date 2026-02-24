@@ -166,7 +166,7 @@ export function TradingPage() {
   }
 
   // Select All: operates on the currently visible (filtered + sliced) pairs
-  const visiblePairs = filteredUnwatched.slice(0, 50);
+  const visiblePairs = filteredUnwatched.slice(0, 200);
   const allVisibleSelected = visiblePairs.length > 0 && visiblePairs.every(p => selectedNewPairs.has(p));
   const someVisibleSelected = visiblePairs.some(p => selectedNewPairs.has(p));
 

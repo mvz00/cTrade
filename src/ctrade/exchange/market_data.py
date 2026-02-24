@@ -20,43 +20,54 @@ from ctrade.core.models import Candle, Ticker
 
 logger = logging.getLogger(__name__)
 
-# Seed prices for simulated pairs (multi-quote for demo)
-_SEED_PRICES: dict[str, float] = {
-    "BTC/USDT": 67000.0,
-    "ETH/USDT": 3500.0,
-    "SOL/USDT": 145.0,
-    "BNB/USDT": 580.0,
-    "XRP/USDT": 0.62,
-    "ADA/USDT": 0.45,
-    "DOGE/USDT": 0.082,
-    "DOT/USDT": 7.20,
-    "AVAX/USDT": 35.0,
-    "LINK/USDT": 14.50,
-    # USDC pairs
-    "BTC/USDC": 67000.0,
-    "ETH/USDC": 3500.0,
-    # BTC pairs
-    "ETH/BTC": 0.052,
-    "SOL/BTC": 0.00216,
-    "XRP/BTC": 0.0000093,
-    "ADA/BTC": 0.0000067,
-    "BNB/BTC": 0.00866,
-    "LINK/BTC": 0.000216,
-    "AVAX/BTC": 0.000522,
-    "DOT/BTC": 0.000107,
-    "DOGE/BTC": 0.00000122,
-    # AUD pairs (CoinSpot)
-    "BTC/AUD": 103000.0,
-    "ETH/AUD": 5400.0,
-    "SOL/AUD": 223.0,
-    "XRP/AUD": 0.96,
-    "ADA/AUD": 0.69,
-    "DOGE/AUD": 0.126,
-    "DOT/AUD": 11.10,
-    "AVAX/AUD": 54.0,
-    "LINK/AUD": 22.30,
-    "BNB/AUD": 893.0,
+# Top ~50 coins with approximate USD prices for seed/simulation data.
+# Used to dynamically generate trading pairs for any quote currency.
+_TOP_COINS: dict[str, float] = {
+    "BTC": 67000.0, "ETH": 3500.0, "SOL": 145.0, "BNB": 580.0,
+    "XRP": 0.62, "ADA": 0.45, "DOGE": 0.082, "DOT": 7.20,
+    "AVAX": 35.0, "LINK": 14.50, "MATIC": 0.58, "UNI": 9.80,
+    "SHIB": 0.000009, "LTC": 72.0, "ATOM": 8.50, "FIL": 5.80,
+    "NEAR": 5.20, "APT": 8.90, "ARB": 1.10, "OP": 2.30,
+    "SUI": 1.05, "SEI": 0.42, "INJ": 22.0, "TIA": 8.50,
+    "PEPE": 0.0000085, "WIF": 2.10, "FET": 1.60, "RENDER": 6.80,
+    "GRT": 0.22, "AAVE": 95.0, "MKR": 1500.0, "CRV": 0.55,
+    "ALGO": 0.18, "VET": 0.028, "SAND": 0.42, "MANA": 0.38,
+    "AXS": 7.50, "HBAR": 0.075, "FTM": 0.35, "THETA": 1.10,
+    "XLM": 0.11, "ICP": 12.0, "TRX": 0.12, "EOS": 0.78,
+    "FLOW": 0.72, "CHZ": 0.068, "IMX": 1.80, "GALA": 0.028,
+    "1INCH": 0.35, "SUSHI": 1.10, "COMP": 52.0,
 }
+
+# Approximate USD → quote currency conversion rates.
+_QUOTE_RATES: dict[str, float] = {
+    "USDT": 1.0, "USDC": 1.0, "USD": 1.0,
+    "BTC": 1.0 / 67000.0,
+    "AUD": 1.54,
+    "EUR": 0.92,
+}
+
+
+def _generate_seed_pairs(quotes: set[str] | None = None) -> dict[str, float]:
+    """Generate seed pairs by combining top coins with quote currencies.
+
+    For each coin in ``_TOP_COINS`` and each requested quote currency,
+    produces a ``BASE/QUOTE`` pair with a realistic approximate price.
+    Self-pairs (e.g. BTC/BTC) are excluded.
+    """
+    if quotes is None:
+        quotes = set(_QUOTE_RATES.keys())
+    pairs: dict[str, float] = {}
+    for base, usd_price in _TOP_COINS.items():
+        for quote in quotes:
+            if base == quote:
+                continue
+            rate = _QUOTE_RATES.get(quote, 1.0)
+            pairs[f"{base}/{quote}"] = round(usd_price * rate, 8)
+    return pairs
+
+
+# Pre-generate seed prices for all known quote currencies (~250 pairs).
+_SEED_PRICES: dict[str, float] = _generate_seed_pairs()
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30,
