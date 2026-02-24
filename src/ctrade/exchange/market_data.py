@@ -486,19 +486,19 @@ class MarketDataProvider:
                 continue
 
             ccxt_ok = False
+            ccxt_count = 0
             exchange = await self._create_ccxt_exchange(ex_info["id"])
             if exchange:
                 try:
                     raw = await exchange.fetch_balance()
                     free: dict[str, Any] = raw.get("free", {})
-                    count = 0
                     for cur, amt in free.items():
                         if amt and float(amt) > 0:
                             merged[cur] = merged.get(cur, 0.0) + float(amt)
-                            count += 1
+                            ccxt_count += 1
                     logger.info(
                         "ccxt fetch_balance OK for %s: %d non-zero currencies",
-                        ex_name, count,
+                        ex_name, ccxt_count,
                     )
                     any_success = True
                     ccxt_ok = True
@@ -515,8 +515,9 @@ class MarketDataProvider:
                     ex_name, ex_info.get("id", "?"),
                 )
 
-            # Fallback: CoinSpot native API when ccxt fails
-            if not ccxt_ok and ex_name.lower() == "coinspot":
+            # Fallback: CoinSpot native API when ccxt fails OR returns empty
+            needs_native = not ccxt_ok or ccxt_count == 0
+            if needs_native and ex_name.lower() == "coinspot":
                 logger.info("Trying CoinSpot native API for balance...")
                 entry = store.get_exchange_entry(ex_info["id"])
                 if entry:
