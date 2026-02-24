@@ -133,6 +133,7 @@ export interface Position {
   strategy_name: string;
   opened_at: string;
   closed_at: string | null;
+  justification?: string;
 }
 
 export interface Portfolio {

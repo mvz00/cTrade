@@ -121,6 +121,7 @@ class LiveEngine:
         price: float | None = None,
         signal_id: str | None = None,
         strategy_name: str = "",
+        justification: str = "",
     ) -> Order:
         """Place a real order on the exchange via ccxt."""
         from ctrade.core.config_store import RuntimeConfigStore
@@ -251,7 +252,7 @@ class LiveEngine:
 
             with self._data_lock:
                 self._orders.append(order)
-                self._update_positions(order, strategy_name)
+                self._update_positions(order, strategy_name, justification)
                 self._record_equity_snapshot()
 
             # Publish event
@@ -294,7 +295,7 @@ class LiveEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "") -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "") -> None:
         """Update positions after a filled order (must hold _data_lock)."""
         if order.side == OrderSide.BUY:
             existing = self._find_open_position(order.pair_symbol, PositionSide.SHORT)
@@ -313,6 +314,7 @@ class LiveEngine:
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
+                    justification=justification,
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -342,6 +344,7 @@ class LiveEngine:
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
+                    justification=justification,
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -659,4 +662,5 @@ class LiveEngine:
             "strategy_name": p.strategy_name,
             "opened_at": p.opened_at.isoformat(),
             "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+            "justification": p.justification,
         }

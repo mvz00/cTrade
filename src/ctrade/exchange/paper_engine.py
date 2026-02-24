@@ -119,6 +119,7 @@ class PaperEngine:
         price: float | None = None,
         signal_id: str | None = None,
         strategy_name: str = "",
+        justification: str = "",
     ) -> Order:
         """Place an order. Market orders fill immediately."""
         from ctrade.exchange.market_data import MarketDataProvider
@@ -194,7 +195,7 @@ class PaperEngine:
                 self._orders.append(order)
 
                 # Update positions
-                self._update_positions(order, strategy_name)
+                self._update_positions(order, strategy_name, justification)
                 # Record equity
                 self._record_equity()
 
@@ -216,7 +217,7 @@ class PaperEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "") -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "") -> None:
         """Update positions after a filled order."""
         if order.side == OrderSide.BUY:
             # Check for existing short position to close
@@ -237,6 +238,7 @@ class PaperEngine:
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
+                    justification=justification,
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -265,6 +267,7 @@ class PaperEngine:
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
+                    justification=justification,
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -588,4 +591,5 @@ class PaperEngine:
             "strategy_name": p.strategy_name,
             "opened_at": p.opened_at.isoformat(),
             "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+            "justification": p.justification,
         }

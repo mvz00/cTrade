@@ -254,6 +254,7 @@ async def position_to_orm(position: Position, resolver: PairResolver) -> Positio
         exit_signal_id=position.exit_signal_id,
         opened_at=position.opened_at,
         closed_at=position.closed_at,
+        metadata_json={"justification": position.justification} if position.justification else None,
     )
 
 
@@ -279,6 +280,7 @@ def orm_to_position(orm: PositionModel, resolver: PairResolver) -> Position:
         exit_signal_id=orm.exit_signal_id,
         opened_at=orm.opened_at,
         closed_at=orm.closed_at,
+        justification=(orm.metadata_json or {}).get("justification", ""),
     )
 
 

@@ -113,6 +113,7 @@ class Position:
     exit_signal_id: UUID | None = None
     opened_at: datetime = field(default_factory=_utc_now)
     closed_at: datetime | None = None
+    justification: str = ""  # Human-readable trade rationale
 
 
 @dataclass(frozen=True)

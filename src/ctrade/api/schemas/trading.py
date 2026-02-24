@@ -66,6 +66,7 @@ class PositionResponse(BaseModel):
     strategy_name: str
     opened_at: str
     closed_at: str | None = None
+    justification: str = ""
 
 
 class PortfolioResponse(BaseModel):

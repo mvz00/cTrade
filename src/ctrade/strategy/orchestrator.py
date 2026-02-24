@@ -37,6 +37,101 @@ _DEFAULT_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
 _MAX_ACTIVITY_LOG = 100
 
 
+def _build_justification(
+    pair: str,
+    side: str,
+    signal: Signal,
+    composite: float,
+    agreement: str,
+) -> str:
+    """Build a human-readable justification for a trade from signal data.
+
+    Returns a short summary (max ~500 chars) explaining which intelligence
+    sources contributed and their key findings.
+    """
+    factors = signal.contributing_factors
+    fusion = factors.get("fusion", {})
+    scores = fusion.get("scores", {})
+    total_sources = len(scores)
+
+    # Count directional agreement
+    if side == "BUY":
+        aligned = sum(1 for s in scores.values() if s > 0.52)
+    else:
+        aligned = sum(1 for s in scores.values() if s < 0.48)
+
+    parts: list[str] = [f"{side} {pair}:"]
+
+    # Consensus
+    if agreement in ("bullish", "bearish"):
+        parts.append(f"{agreement.capitalize()} consensus ({aligned}/{total_sources} sources).")
+    else:
+        parts.append(f"Mixed signals ({aligned}/{total_sources} aligned).")
+
+    # Technical highlights
+    tech_score = scores.get("technical")
+    if tech_score is not None:
+        tech_details: list[str] = []
+        for ind_name in ("rsi", "macd", "bb", "ema_cross"):
+            ind = factors.get(ind_name) or {}
+            sig = ind.get("signal")
+            if sig and sig != "neutral":
+                label = ind_name.upper().replace("_", " ")
+                tech_details.append(f"{label} {sig}")
+        detail_str = f" ({', '.join(tech_details)})" if tech_details else ""
+        parts.append(f"Technical {tech_score:.2f}{detail_str}.")
+
+    # Sentiment
+    sent_score = scores.get("sentiment")
+    if sent_score is not None:
+        sent_info = factors.get("sentiment", {})
+        sent_signal = sent_info.get("signal", "")
+        parts.append(f"Sentiment {sent_score:.2f}{f' ({sent_signal})' if sent_signal else ''}.")
+
+    # Derivatives
+    deriv_score = scores.get("derivatives")
+    if deriv_score is not None:
+        deriv_info = factors.get("derivatives", {})
+        deriv_signal = deriv_info.get("signal", "")
+        parts.append(f"Derivatives {deriv_score:.2f}{f' ({deriv_signal})' if deriv_signal else ''}.")
+
+    # On-chain
+    onchain_score = scores.get("onchain")
+    if onchain_score is not None:
+        parts.append(f"On-chain {onchain_score:.2f}.")
+
+    # Market sentiment
+    mkt_score = scores.get("market_sentiment")
+    if mkt_score is not None:
+        mkt_info = factors.get("market_sentiment", {})
+        mkt_signal = mkt_info.get("signal", "")
+        parts.append(f"Mkt sentiment {mkt_score:.2f}{f' ({mkt_signal})' if mkt_signal else ''}.")
+
+    # CVD
+    cvd_score = scores.get("cvd")
+    if cvd_score is not None:
+        cvd_info = factors.get("cvd", {})
+        cvd_signal = cvd_info.get("signal", "")
+        parts.append(f"CVD {cvd_score:.2f}{f' ({cvd_signal})' if cvd_signal else ''}.")
+
+    # Social velocity
+    social_score = scores.get("social_velocity")
+    if social_score is not None:
+        sv_info = factors.get("social_velocity", {})
+        velocity = sv_info.get("velocity_ratio")
+        if velocity and velocity > 1.5:
+            parts.append(f"Social spike {velocity:.1f}x.")
+        else:
+            parts.append(f"Social {social_score:.2f}.")
+
+    # Confidence
+    confidence_pct = round(signal.confidence * 100)
+    parts.append(f"Confidence: {confidence_pct}%.")
+
+    result = " ".join(parts)
+    return result[:500] if len(result) > 500 else result
+
+
 class TradingOrchestrator:
     """Background trading loop singleton."""
 
@@ -664,6 +759,10 @@ class TradingOrchestrator:
         log_type = "buy" if side == "buy" else "sell"
 
         if quantity > 0:
+            justification = _build_justification(
+                pair=pair, side=side_label, signal=signal,
+                composite=composite, agreement=agreement,
+            )
             order = await engine.place_order(
                 symbol=pair,
                 side=side,
@@ -671,6 +770,7 @@ class TradingOrchestrator:
                 quantity=quantity,
                 signal_id=str(signal.id),
                 strategy_name=strategy_label,
+                justification=justification,
             )
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
             logger.info(

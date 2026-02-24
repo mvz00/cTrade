@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { Fragment, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -530,33 +530,44 @@ export function TradingPage() {
                 </thead>
                 <tbody>
                   {(positions || []).map(p => (
-                    <tr key={p.id} className="border-b border-ct-border/50">
-                      <td className="py-2 font-mono">{p.pair_symbol}</td>
-                      <td>
-                        <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
-                      </td>
-                      <td>{formatNumber(p.quantity, 6)}</td>
-                      <td>{formatUSD(p.entry_price)}</td>
-                      <td className="text-xs text-ct-text-dim">
-                        {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
-                        {' / '}
-                        {p.take_profit ? formatUSD(p.take_profit) : '—'}
-                      </td>
-                      <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                        {formatUSD(p.unrealized_pnl ?? 0)}
-                      </td>
-                      <td>
-                        <button
-                          onClick={() => closePos.mutate(p.id, {
-                            onSuccess: () => toast('Position closed', 'success'),
-                            onError: (e) => toast(e.message, 'error'),
-                          })}
-                          className="text-ct-text-dim hover:text-ct-red"
-                        >
-                          <X size={14} />
-                        </button>
-                      </td>
-                    </tr>
+                    <Fragment key={p.id}>
+                      <tr className="border-b border-ct-border/50">
+                        <td className="py-2 font-mono">{p.pair_symbol}</td>
+                        <td>
+                          <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
+                        </td>
+                        <td>{formatNumber(p.quantity, 6)}</td>
+                        <td>{formatUSD(p.entry_price)}</td>
+                        <td className="text-xs text-ct-text-dim">
+                          {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
+                          {' / '}
+                          {p.take_profit ? formatUSD(p.take_profit) : '—'}
+                        </td>
+                        <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
+                          {formatUSD(p.unrealized_pnl ?? 0)}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => closePos.mutate(p.id, {
+                              onSuccess: () => toast('Position closed', 'success'),
+                              onError: (e) => toast(e.message, 'error'),
+                            })}
+                            className="text-ct-text-dim hover:text-ct-red"
+                          >
+                            <X size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                      {p.justification && (
+                        <tr>
+                          <td colSpan={7} className="pb-2 px-1">
+                            <p className="text-xs text-ct-text-dim italic leading-relaxed">
+                              {p.justification}
+                            </p>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
