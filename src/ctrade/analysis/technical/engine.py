@@ -22,8 +22,8 @@ class TechnicalAnalysisEngine:
     def analyze(
         self,
         candles: list[Candle],
-        entry_threshold: float = 0.70,
-        exit_threshold: float = 0.30,
+        entry_threshold: float = 0.55,
+        exit_threshold: float = 0.45,
         rsi_period: int = 14,
         macd_fast: int = 12,
         macd_slow: int = 26,
@@ -88,7 +88,7 @@ class TechnicalAnalysisEngine:
             id=uuid4(),
             pair_symbol=symbol,
             action=action,
-            confidence=round(abs(composite - 0.5) * 2, 4),  # 0-1 distance from neutral
+            confidence=round(composite, 4),
             technical_score=round(composite, 4),
             strategy_name="technical",
             contributing_factors={

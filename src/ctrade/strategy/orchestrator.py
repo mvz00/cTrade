@@ -370,8 +370,8 @@ class TradingOrchestrator:
             trading = {}
             self._active_exchange_id = None
 
-        entry_threshold = strategy.get("entry_confidence_threshold", 0.70)
-        exit_threshold = strategy.get("exit_confidence_threshold", 0.30)
+        entry_threshold = strategy.get("entry_confidence_threshold", 0.55)
+        exit_threshold = strategy.get("exit_confidence_threshold", 0.45)
         max_position_pct = risk.get("max_position_pct", 0.10)
         max_open = trading.get("max_open_positions", 5)
         max_order_usdt = trading.get("max_order_usdt", 100.0)
@@ -652,7 +652,7 @@ class TradingOrchestrator:
             id=uuid4(),
             pair_symbol=signal.pair_symbol,
             action=action,
-            confidence=round(abs(composite - 0.5) * 2, 4),
+            confidence=round(composite, 4),
             technical_score=tech_score,
             sentiment_score=sentiment_score,
             onchain_score=onchain_score,
