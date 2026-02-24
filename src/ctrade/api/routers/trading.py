@@ -267,3 +267,23 @@ async def stop_engine() -> EngineStatusResponse:
     if not stopped:
         raise HTTPException(status_code=409, detail="Engine not running")
     return EngineStatusResponse(**orch.get_status())
+
+
+@router.post("/engine/reset")
+async def reset_paper_engine() -> dict[str, Any]:
+    """Reset paper trading to initial $10K balance.
+
+    Stops the engine if running, clears all orders/positions/history,
+    and restores the starting balance.  Cannot be undone.
+    """
+    # Stop engine first if running
+    orch = TradingOrchestrator.get_instance()
+    try:
+        await orch.stop()
+    except Exception:
+        pass  # Already stopped — that's fine
+
+    engine = PaperEngine.get_instance()
+    await engine.reset_to_defaults()
+
+    return {"success": True, "balance": 10_000.0, "message": "Paper trading reset to $10,000"}

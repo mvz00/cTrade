@@ -78,6 +78,50 @@ class PaperEngine:
         with cls._lock:
             cls._instance = None
 
+    async def reset_to_defaults(self) -> None:
+        """Wipe all paper-trading state and restore $10K balance.
+
+        Clears in-memory orders, positions, equity curve, and cash.
+        Deletes all paper-mode records from the database so the clean
+        state persists across restarts.
+        """
+        with self._data_lock:
+            self._cash = {"USDT": INITIAL_BALANCE}
+            self._orders.clear()
+            self._positions.clear()
+            self._equity_curve.clear()
+            self._daily_pnl_start = float(INITIAL_BALANCE)
+
+            # Record fresh initial equity point
+            self._equity_curve.append(EquityPoint(
+                timestamp=datetime.now(timezone.utc),
+                total_value=float(INITIAL_BALANCE),
+                cash=float(INITIAL_BALANCE),
+                positions_value=0.0,
+            ))
+
+        # Clear database records
+        if is_db_ready():
+            async def _clear_db(session, _resolver):
+                from sqlalchemy import delete
+                from ctrade.db.models import OrderModel, PositionModel, PortfolioSnapshotModel
+
+                await session.execute(
+                    delete(OrderModel).where(OrderModel.trading_mode == "paper")
+                )
+                await session.execute(
+                    delete(PositionModel).where(PositionModel.trading_mode == "paper")
+                )
+                await session.execute(
+                    delete(PortfolioSnapshotModel).where(
+                        PortfolioSnapshotModel.trading_mode == "paper"
+                    )
+                )
+
+            await run_db_operation(_clear_db, description="reset paper engine DB")
+
+        logger.info("Paper engine reset to $%.2f", float(INITIAL_BALANCE))
+
     # ---- Event publishing ----
 
     @staticmethod

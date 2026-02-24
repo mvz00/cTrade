@@ -156,6 +156,8 @@ export const api = {
   startEngine: (interval?: number) =>
     apiFetch<EngineStatus>('/trading/engine/start', { method: 'POST', body: interval ? JSON.stringify({ interval }) : '{}' }),
   stopEngine: () => apiFetch<EngineStatus>('/trading/engine/stop', { method: 'POST' }),
+  resetPaperEngine: () =>
+    apiFetch<{ success: boolean; balance: number; message: string }>('/trading/engine/reset', { method: 'POST' }),
 
   listSignals: (params?: { symbol?: string; action?: string; limit?: number }) => {
     const qs = new URLSearchParams();
