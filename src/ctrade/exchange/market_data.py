@@ -97,6 +97,7 @@ class MarketDataProvider:
             return list(_SEED_PRICES.keys())
 
         all_pairs: set[str] = set()
+        all_configured_quotes: set[str] = set()
 
         for ex_info in exchanges_list:
             if not ex_info.get("is_active", True):
@@ -106,8 +107,15 @@ class MarketDataProvider:
                 continue
 
             quote_currencies = set(entry.quote_currencies)
+            all_configured_quotes.update(quote_currencies)
+
             exchange = await self._create_ccxt_exchange(ex_info["id"])
             if not exchange:
+                logger.warning(
+                    "Could not create ccxt instance for %s — "
+                    "seed pairs will be used for its quote currencies",
+                    entry.name,
+                )
                 continue
             try:
                 markets = await exchange.load_markets()
@@ -119,20 +127,32 @@ class MarketDataProvider:
                     ):
                         all_pairs.add(symbol)
             except Exception as e:
-                logger.debug("Failed to load markets from %s: %s", entry.name, e)
+                logger.warning(
+                    "Failed to load markets from %s: %s — "
+                    "seed pairs will be used for its quote currencies",
+                    entry.name, e,
+                )
             finally:
                 await exchange.close()
+
+        # Supplement with seed pairs for ALL configured quote currencies.
+        # This ensures paper trading always has pairs available even when
+        # ccxt fails to load markets from an exchange.
+        for symbol in _SEED_PRICES:
+            quote = symbol.split("/")[1]
+            if quote in all_configured_quotes:
+                all_pairs.add(symbol)
 
         if all_pairs:
             pairs = sorted(all_pairs)
             self._cached_exchange_pairs = pairs
             logger.info(
-                "Loaded %d pairs from %d exchange(s)",
-                len(pairs), len(exchanges_list),
+                "Loaded %d pairs for quote currencies %s",
+                len(pairs), sorted(all_configured_quotes),
             )
             return pairs
 
-        # No pairs from any exchange — fall back to simulated
+        # No pairs from any exchange — fall back to full simulated list
         return list(_SEED_PRICES.keys())
 
     def clear_pairs_cache(self) -> None:
