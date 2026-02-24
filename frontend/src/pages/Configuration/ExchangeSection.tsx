@@ -5,6 +5,7 @@ import {
   useUpdateExchange,
   useDeleteExchange,
   useTestExchange,
+  useToggleExchange,
 } from '@/api/hooks/useExchanges';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -14,7 +15,7 @@ import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
-import { Plug, Plus, Trash2, Wifi, Pencil, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plug, Plus, Trash2, Wifi, Pencil, X, ChevronDown, ChevronRight, Power } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { RiskConfig } from '@/api/types';
@@ -176,6 +177,7 @@ export function ExchangeSection() {
   const addExchange = useAddExchange();
   const updateExchange = useUpdateExchange();
   const deleteExchange = useDeleteExchange();
+  const toggleExchange = useToggleExchange();
   const testExchange = useTestExchange();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -341,6 +343,15 @@ export function ExchangeSection() {
     });
   }
 
+  function handleToggle(id: string, exchangeName: string, currentlyActive: boolean) {
+    toggleExchange.mutate(id, {
+      onSuccess: () => {
+        toast(`${exchangeName} ${currentlyActive ? 'disabled' : 'enabled'}`, 'success');
+      },
+      onError: (err) => toast(err.message, 'error'),
+    });
+  }
+
   const hasEditValues =
     editApiKey.trim() ||
     editApiSecret.trim() ||
@@ -376,10 +387,12 @@ export function ExchangeSection() {
           {exchanges.map((ex) => (
             <div key={ex.id}>
               <div
-                className="flex items-center justify-between py-3 px-4 rounded-lg bg-ct-bg border border-ct-border"
+                className={`flex items-center justify-between py-3 px-4 rounded-lg bg-ct-bg border border-ct-border transition-opacity ${
+                  !ex.is_active ? 'opacity-50' : ''
+                }`}
               >
                 <div className="flex items-center gap-3 flex-wrap">
-                  <StatusDot status={ex.is_active ? 'ok' : 'warning'} />
+                  <StatusDot status={ex.is_active ? 'ok' : 'warning'} label={ex.is_active ? undefined : 'Disabled'} />
                   <span className="text-sm font-medium text-ct-text capitalize">{ex.name}</span>
                   <Badge variant="info">{ex.exchange_type}</Badge>
                   {/* Quote currency badges */}
@@ -398,6 +411,21 @@ export function ExchangeSection() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggle(ex.id, ex.name, ex.is_active)}
+                    disabled={toggleExchange.isPending}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      ex.is_active ? 'bg-ct-green' : 'bg-ct-bg-hover'
+                    }`}
+                    title={ex.is_active ? 'Disable exchange' : 'Enable exchange'}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        ex.is_active ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                   <Button
                     variant="ghost"
                     onClick={() => handleEdit(ex.id)}

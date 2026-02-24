@@ -71,6 +71,18 @@ def _generate_seed_pairs(quotes: set[str] | None = None) -> dict[str, float]:
 # Pre-generate seed prices for all known quote currencies (~250 pairs).
 _SEED_PRICES: dict[str, float] = _generate_seed_pairs()
 
+# Stablecoins and fiat treated as USD-equivalent for portfolio valuation.
+_CASH_CURRENCIES: set[str] = {
+    "USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD",  # stablecoins
+    "USD", "EUR", "GBP", "AUD", "CAD", "JPY", "CHF",  # fiat
+}
+
+# Fiat → approximate USD conversion (good enough for portfolio display).
+_FIAT_TO_USD: dict[str, float] = {
+    "USD": 1.0, "EUR": 1.08, "GBP": 1.27, "AUD": 0.65,
+    "CAD": 0.74, "JPY": 0.0067, "CHF": 1.13,
+}
+
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30,
     "1h": 60, "4h": 240, "1d": 1440, "1w": 10080,
@@ -557,51 +569,28 @@ class MarketDataProvider:
 
         return merged if any_success else None
 
-    async def fetch_exchange_portfolio(self) -> dict[str, Any] | None:
-        """Build a portfolio summary from real exchange balances.
+    async def _price_balances(self, balances: dict[str, float]) -> dict[str, Any]:
+        """Price a set of currency balances and return a portfolio summary.
 
-        Returns a dict compatible with the ``PortfolioResponse`` schema,
-        or ``None`` if the balance fetch fails.
+        Uses a two-pass strategy:
+        - Pass 1 (instant): seed-price estimates for all holdings
+        - Pass 2 (capped): live ticker lookups for top 10 holdings
 
-        Tries real exchange tickers first (across all exchanges), then
-        falls back to seed prices for approximate valuation.
+        Returns a dict compatible with the ``PortfolioResponse`` schema.
         """
-        balances = await self.fetch_exchange_balance()
-        if balances is None:
-            logger.warning("fetch_exchange_portfolio: balance fetch returned None")
-            return None
-
-        logger.info(
-            "fetch_exchange_portfolio: pricing %d currencies: %s",
-            len(balances), list(balances.keys()),
-        )
-
-        # Stablecoins and fiat treated as USD-equivalent
-        _CASH_CURRENCIES = {
-            "USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD",  # stablecoins
-            "USD", "EUR", "GBP", "AUD", "CAD", "JPY", "CHF",  # fiat
-        }
-        # Fiat → approximate USD conversion (good enough for portfolio display)
-        _FIAT_TO_USD: dict[str, float] = {
-            "USD": 1.0, "EUR": 1.08, "GBP": 1.27, "AUD": 0.65,
-            "CAD": 0.74, "JPY": 0.0067, "CHF": 1.13,
-        }
-
         cash_value = 0.0
         positions_value = 0.0
         non_stable_count = 0
 
         # ------------------------------------------------------------------
         # Pass 1: Fast valuation using seed prices (no API calls).
-        # Identifies which currencies are significant (> $1 estimated).
         # ------------------------------------------------------------------
-        crypto_holdings: list[tuple[str, float, float]] = []  # (currency, amount, est_usd)
+        crypto_holdings: list[tuple[str, float, float]] = []
         for currency, amount in balances.items():
             if currency in _CASH_CURRENCIES:
                 rate = _FIAT_TO_USD.get(currency, 1.0)
                 cash_value += amount * rate
             else:
-                # Quick estimate from seed prices
                 seed_price = _SEED_PRICES.get(
                     f"{currency}/USDT",
                     _SEED_PRICES.get(
@@ -610,28 +599,19 @@ class MarketDataProvider:
                     ),
                 )
                 est_usd = amount * seed_price if seed_price > 0 else 0.0
-                if est_usd >= 0.01:  # skip dust
+                if est_usd >= 0.01:
                     crypto_holdings.append((currency, amount, est_usd))
 
-        # Sort by estimated value descending so we price the biggest first
         crypto_holdings.sort(key=lambda x: x[2], reverse=True)
-        logger.info(
-            "Portfolio: %d crypto holdings above dust, top: %s",
-            len(crypto_holdings),
-            [(c, f"~${v:.2f}") for c, _, v in crypto_holdings[:5]],
-        )
 
         # ------------------------------------------------------------------
-        # Pass 2: Get real prices for the top holdings only (max 10 live
-        # ticker lookups to keep response fast). Use seed price for the rest.
+        # Pass 2: Live prices for top holdings only.
         # ------------------------------------------------------------------
         _MAX_LIVE_LOOKUPS = 10
 
         for i, (currency, amount, est_usd) in enumerate(crypto_holdings):
-            usd_value = est_usd  # default to seed estimate
-
+            usd_value = est_usd
             if i < _MAX_LIVE_LOOKUPS:
-                # Try real ticker for top holdings
                 try:
                     ticker = await self._try_ccxt_ticker(f"{currency}/USDT")
                     if ticker is None:
@@ -644,7 +624,7 @@ class MarketDataProvider:
                             price *= _FIAT_TO_USD.get("AUD", 0.65)
                         usd_value = amount * price
                 except Exception:
-                    pass  # keep seed estimate
+                    pass
 
             if usd_value >= 0.01:
                 positions_value += usd_value
@@ -652,18 +632,11 @@ class MarketDataProvider:
 
         total_value = cash_value + positions_value
 
-        # Build cash_balance with only actual cash/stablecoin currencies
-        # (USD-converted values so the frontend can sum them directly)
         cash_bal_usd: dict[str, float] = {}
         for currency, amount in balances.items():
             if currency in _CASH_CURRENCIES:
                 rate = _FIAT_TO_USD.get(currency, 1.0)
                 cash_bal_usd[currency] = round(amount * rate, 2)
-
-        logger.info(
-            "fetch_exchange_portfolio: total=$%.2f (cash=$%.2f + positions=$%.2f), %d crypto holdings",
-            total_value, cash_value, positions_value, non_stable_count,
-        )
 
         return {
             "cash_balance": cash_bal_usd,
@@ -676,6 +649,115 @@ class MarketDataProvider:
             "closed_positions": 0,
             "total_orders": 0,
         }
+
+    async def fetch_exchange_portfolio(self) -> dict[str, Any] | None:
+        """Build a portfolio summary from real exchange balances.
+
+        Returns a dict compatible with the ``PortfolioResponse`` schema,
+        or ``None`` if the balance fetch fails.
+        """
+        balances = await self.fetch_exchange_balance()
+        if balances is None:
+            logger.warning("fetch_exchange_portfolio: balance fetch returned None")
+            return None
+
+        logger.info(
+            "fetch_exchange_portfolio: pricing %d currencies: %s",
+            len(balances), list(balances.keys()),
+        )
+
+        result = await self._price_balances(balances)
+
+        logger.info(
+            "fetch_exchange_portfolio: total=$%.2f (cash=$%.2f + positions=$%.2f), %d crypto holdings",
+            result["total_value_usd"],
+            sum(result["cash_balance"].values()),
+            result["positions_value"],
+            result["open_positions"],
+        )
+
+        return result
+
+    async def fetch_per_exchange_portfolios(self) -> dict[str, dict[str, Any]]:
+        """Fetch portfolio for each exchange separately (for snapshots).
+
+        Returns ``{exchange_name: portfolio_dict}`` where each portfolio_dict
+        has the same shape as ``fetch_exchange_portfolio()`` output.
+
+        Unlike ``fetch_exchange_balance()`` which merges all exchanges,
+        this keeps balances separate so we can snapshot each exchange
+        independently.
+        """
+        from ctrade.core.config_store import RuntimeConfigStore
+        try:
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
+            return {}
+
+        if not exchanges_list:
+            return {}
+
+        results: dict[str, dict[str, Any]] = {}
+
+        for ex_info in exchanges_list:
+            ex_name = ex_info.get("name", "?")
+            if not ex_info.get("is_active", True):
+                continue
+
+            # Collect balances for this single exchange
+            balances: dict[str, float] = {}
+            ccxt_ok = False
+            ccxt_count = 0
+
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if exchange:
+                try:
+                    raw = await exchange.fetch_balance()
+                    free: dict[str, Any] = raw.get("free", {})
+                    for cur, amt in free.items():
+                        if amt and float(amt) > 0:
+                            balances[cur] = balances.get(cur, 0.0) + float(amt)
+                            ccxt_count += 1
+                    ccxt_ok = True
+                except Exception as e:
+                    logger.warning(
+                        "ccxt fetch_balance failed for %s: %s", ex_name, e,
+                    )
+                finally:
+                    await exchange.close()
+
+            # CoinSpot native API fallback
+            needs_native = not ccxt_ok or ccxt_count == 0
+            if needs_native and ex_name.lower() == "coinspot":
+                entry = store.get_exchange_entry(ex_info["id"])
+                if entry:
+                    from ctrade.security.vault import Vault
+                    from ctrade.settings import get_settings
+                    try:
+                        settings = get_settings()
+                        key = settings.encryption_key.get_secret_value()
+                        vault = Vault(key)
+                        api_key = vault.decrypt(entry.api_key_encrypted)
+                        api_secret = vault.decrypt(entry.api_secret_encrypted)
+                        native_bal = await self._fetch_coinspot_balance_native(
+                            api_key, api_secret,
+                        )
+                        if native_bal:
+                            for cur, amt in native_bal.items():
+                                balances[cur] = balances.get(cur, 0.0) + amt
+                    except Exception as e:
+                        logger.warning("CoinSpot native fallback failed: %s", e)
+
+            if balances:
+                portfolio = await self._price_balances(balances)
+                results[ex_name] = portfolio
+                logger.info(
+                    "Per-exchange portfolio for %s: $%.2f",
+                    ex_name, portfolio["total_value_usd"],
+                )
+
+        return results
 
     def _simulated_ticker(self, symbol: str) -> Ticker:
         """Generate a simulated ticker with realistic price movement."""

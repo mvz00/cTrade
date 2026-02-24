@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _event_bus, _db_available
     settings = get_settings()
     feed_task: asyncio.Task[None] | None = None
+    snapshot_task: asyncio.Task[None] | None = None
 
     print(f"[cTrade] Starting cTrade v0.1.0 on port {settings.api_port}...", flush=True)
 
@@ -163,6 +164,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"[cTrade] [5/6] Feeds FAILED (non-fatal): {e}", flush=True)
 
+    # --- Step 5b: Portfolio snapshot task ---
+    if _db_available:
+        try:
+            from ctrade.exchange.snapshot_task import run_snapshot_loop
+
+            snapshot_task = asyncio.create_task(run_snapshot_loop())
+            print("[cTrade]        Portfolio snapshot task started (every 5 min)", flush=True)
+        except Exception as e:
+            print(f"[cTrade]        Snapshot task FAILED (non-fatal): {e}", flush=True)
+
     # --- Step 6: Notification channels ---
     try:
         from ctrade.notifications.channels.router import NotificationRouter
@@ -212,6 +223,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # --- Shutdown (also crash-proof) ---
     print("[cTrade] Shutting down...", flush=True)
+
+    # Cancel snapshot task
+    try:
+        if snapshot_task is not None and not snapshot_task.done():
+            snapshot_task.cancel()
+            try:
+                await snapshot_task
+            except asyncio.CancelledError:
+                pass
+            print("[cTrade] Snapshot task stopped", flush=True)
+    except Exception as e:
+        print(f"[cTrade] Snapshot task shutdown error: {e}", flush=True)
+
     try:
         if feed_task is not None:
             if not feed_task.done():

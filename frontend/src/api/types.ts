@@ -467,3 +467,16 @@ export interface ConnectionTestResult {
 export interface ConnectionCredentialsRequest {
   credentials: Record<string, string>;
 }
+
+// ---- Portfolio History (per-exchange equity curve) ----
+
+export interface PortfolioHistoryPoint {
+  timestamp: string;
+  total_value_usd: number;
+}
+
+export interface PortfolioHistorySeries {
+  exchange_id: string;
+  exchange_name: string;
+  points: PortfolioHistoryPoint[];
+}
