@@ -120,6 +120,8 @@ class PaperEngine:
         signal_id: str | None = None,
         strategy_name: str = "",
         justification: str = "",
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
     ) -> Order:
         """Place an order. Market orders fill immediately."""
         from ctrade.exchange.market_data import MarketDataProvider
@@ -195,7 +197,7 @@ class PaperEngine:
                 self._orders.append(order)
 
                 # Update positions
-                self._update_positions(order, strategy_name, justification)
+                self._update_positions(order, strategy_name, justification, stop_loss, take_profit)
                 # Record equity
                 self._record_equity()
 
@@ -217,7 +219,7 @@ class PaperEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "") -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None) -> None:
         """Update positions after a filled order."""
         if order.side == OrderSide.BUY:
             # Check for existing short position to close
@@ -235,6 +237,8 @@ class PaperEngine:
                     status=PositionStatus.OPEN,
                     entry_price=order.avg_fill_price or Decimal("0"),
                     quantity=order.filled_quantity,
+                    stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+                    take_profit=Decimal(str(take_profit)) if take_profit else None,
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
@@ -264,6 +268,8 @@ class PaperEngine:
                     status=PositionStatus.OPEN,
                     entry_price=order.avg_fill_price or Decimal("0"),
                     quantity=order.filled_quantity,
+                    stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+                    take_profit=Decimal(str(take_profit)) if take_profit else None,
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,

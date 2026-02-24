@@ -389,7 +389,7 @@ class MarketDataProvider:
         """Get current simulated price synchronously (for paper engine)."""
         with self._data_lock:
             base = self._sim_prices.get(symbol, _SEED_PRICES.get(symbol, 100.0))
-            change = self._sim_rng.gauss(0, 0.001)
+            change = self._sim_rng.gauss(0, 0.005)
             new_price = base * (1 + change)
             self._sim_prices[symbol] = new_price
             return round(new_price, 8)

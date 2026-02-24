@@ -122,6 +122,8 @@ class LiveEngine:
         signal_id: str | None = None,
         strategy_name: str = "",
         justification: str = "",
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
     ) -> Order:
         """Place a real order on the exchange via ccxt."""
         from ctrade.core.config_store import RuntimeConfigStore
@@ -252,7 +254,7 @@ class LiveEngine:
 
             with self._data_lock:
                 self._orders.append(order)
-                self._update_positions(order, strategy_name, justification)
+                self._update_positions(order, strategy_name, justification, stop_loss, take_profit)
                 self._record_equity_snapshot()
 
             # Publish event
@@ -295,7 +297,7 @@ class LiveEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "") -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None) -> None:
         """Update positions after a filled order (must hold _data_lock)."""
         if order.side == OrderSide.BUY:
             existing = self._find_open_position(order.pair_symbol, PositionSide.SHORT)
@@ -311,6 +313,8 @@ class LiveEngine:
                     status=PositionStatus.OPEN,
                     entry_price=order.avg_fill_price or Decimal("0"),
                     quantity=order.filled_quantity,
+                    stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+                    take_profit=Decimal(str(take_profit)) if take_profit else None,
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
@@ -341,6 +345,8 @@ class LiveEngine:
                     status=PositionStatus.OPEN,
                     entry_price=order.avg_fill_price or Decimal("0"),
                     quantity=order.filled_quantity,
+                    stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+                    take_profit=Decimal(str(take_profit)) if take_profit else None,
                     fees_total=order.fee,
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,

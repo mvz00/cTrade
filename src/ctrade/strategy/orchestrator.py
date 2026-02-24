@@ -52,7 +52,9 @@ def _build_justification(
     factors = signal.contributing_factors
     fusion = factors.get("fusion", {})
     scores = fusion.get("scores", {})
-    total_sources = len(scores)
+    _ALL_FEED_KEYS = ("technical", "sentiment", "onchain", "derivatives", "market_sentiment", "cvd", "social_velocity")
+    total_configured = len(_ALL_FEED_KEYS)
+    active_sources = len(scores)
 
     # Count directional agreement
     if side == "BUY":
@@ -64,9 +66,9 @@ def _build_justification(
 
     # Consensus
     if agreement in ("bullish", "bearish"):
-        parts.append(f"{agreement.capitalize()} consensus ({aligned}/{total_sources} sources).")
+        parts.append(f"{agreement.capitalize()} consensus ({aligned}/{active_sources} active, {active_sources}/{total_configured} feeds).")
     else:
-        parts.append(f"Mixed signals ({aligned}/{total_sources} aligned).")
+        parts.append(f"Mixed signals ({aligned}/{active_sources} active, {active_sources}/{total_configured} feeds).")
 
     # Technical highlights
     tech_score = scores.get("technical")
@@ -104,7 +106,8 @@ def _build_justification(
     mkt_score = scores.get("market_sentiment")
     if mkt_score is not None:
         mkt_info = factors.get("market_sentiment", {})
-        mkt_signal = mkt_info.get("signal", "")
+        fg = mkt_info.get("fear_greed", {})
+        mkt_signal = fg.get("signal", "")
         parts.append(f"Mkt sentiment {mkt_score:.2f}{f' ({mkt_signal})' if mkt_signal else ''}.")
 
     # CVD
@@ -706,6 +709,7 @@ class TradingOrchestrator:
                 signal, pair, engine, market, signal_mgr,
                 portfolio, open_positions, max_open, max_order_usdt,
                 max_position_pct, composite, agreement,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
         elif strategy_mode == "short_only":
             await self._execute_short_only(
@@ -713,6 +717,7 @@ class TradingOrchestrator:
                 portfolio, open_positions, max_open, max_order_usdt,
                 max_position_pct, composite, agreement,
                 short_min_1h_change_pct,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
         elif strategy_mode == "both":
             await self._execute_both(
@@ -720,6 +725,7 @@ class TradingOrchestrator:
                 portfolio, open_positions, max_open, max_order_usdt,
                 max_position_pct, composite, agreement,
                 short_min_1h_change_pct,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
 
     # ------------------------------------------------------------------
@@ -739,6 +745,8 @@ class TradingOrchestrator:
         composite: float,
         agreement: str,
         cmc_info: dict | None = None,
+        stop_loss_pct: float = 0.03,
+        take_profit_pct: float = 0.06,
     ) -> None:
         """Open a new position (long or short) with standard position sizing."""
         total_value = portfolio["total_value_usd"]
@@ -748,6 +756,14 @@ class TradingOrchestrator:
         if price <= 0:
             return
         quantity = position_budget / price
+
+        # Compute absolute SL/TP price levels
+        if side == "buy":
+            sl_price = price * (1 - stop_loss_pct)
+            tp_price = price * (1 + take_profit_pct)
+        else:  # short
+            sl_price = price * (1 + stop_loss_pct)
+            tp_price = price * (1 - take_profit_pct)
 
         strategy_label = signal.strategy_name or "technical"
         momentum_tag = ""
@@ -771,6 +787,8 @@ class TradingOrchestrator:
                 signal_id=str(signal.id),
                 strategy_name=strategy_label,
                 justification=justification,
+                stop_loss=sl_price,
+                take_profit=tp_price,
             )
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
             logger.info(
@@ -860,6 +878,7 @@ class TradingOrchestrator:
         signal_mgr: SignalManager, portfolio: dict, open_positions: int,
         max_open: int, max_order_usdt: float, max_position_pct: float,
         composite: float, agreement: str,
+        stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
     ) -> None:
         """Long-only mode: BUY opens long, SELL closes long."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -873,6 +892,7 @@ class TradingOrchestrator:
             await self._open_position(
                 pair, "buy", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
 
         elif signal.action == SignalAction.SELL:
@@ -883,6 +903,7 @@ class TradingOrchestrator:
         signal_mgr: SignalManager, portfolio: dict, open_positions: int,
         max_open: int, max_order_usdt: float, max_position_pct: float,
         composite: float, agreement: str, short_min_1h_change_pct: float,
+        stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
     ) -> None:
         """Short-only mode: SELL opens short (momentum filter), BUY closes short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -906,6 +927,7 @@ class TradingOrchestrator:
             await self._open_position(
                 pair, "sell", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
 
         elif signal.action == SignalAction.BUY:
@@ -916,6 +938,7 @@ class TradingOrchestrator:
         signal_mgr: SignalManager, portfolio: dict, open_positions: int,
         max_open: int, max_order_usdt: float, max_position_pct: float,
         composite: float, agreement: str, short_min_1h_change_pct: float,
+        stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
     ) -> None:
         """Both mode: BUY closes short + opens long, SELL closes long + opens short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -936,6 +959,7 @@ class TradingOrchestrator:
             await self._open_position(
                 pair, "buy", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
 
         elif signal.action == SignalAction.SELL:
@@ -958,6 +982,7 @@ class TradingOrchestrator:
             await self._open_position(
                 pair, "sell", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
+                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
             )
 
     async def _check_sl_tp(

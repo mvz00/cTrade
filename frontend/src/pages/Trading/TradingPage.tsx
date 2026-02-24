@@ -545,6 +545,9 @@ export function TradingPage() {
                         </td>
                         <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
                           {formatUSD(p.unrealized_pnl ?? 0)}
+                          <span className="text-xs text-ct-text-dim ml-1">
+                            ({(p.unrealized_pnl_pct ?? 0).toFixed(2)}%)
+                          </span>
                         </td>
                         <td>
                           <button
