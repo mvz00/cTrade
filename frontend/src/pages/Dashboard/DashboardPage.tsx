@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
 import { useWebSocket } from '@/api/hooks/useWebSocket';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import {
   DollarSign, TrendingUp, BarChart3, Radio, Layers, Activity,
 } from 'lucide-react';
@@ -28,8 +28,12 @@ const DASHBOARD_WS_EVENTS = [
   'alert.triggered',
 ];
 
+const HISTORY_RANGES = ['24h', '7d', '30d', '90d', 'all'] as const;
+type HistoryRange = (typeof HISTORY_RANGES)[number];
+
 export function DashboardPage() {
   const queryClient = useQueryClient();
+  const [historyRange, setHistoryRange] = useState<HistoryRange>('7d');
 
   // WebSocket: invalidate React Query cache on relevant events
   const handleWsMessage = useCallback(
@@ -52,6 +56,11 @@ export function DashboardPage() {
   const { data: health } = useHealth();
   const { data: status } = useQuery({ queryKey: ['dashboard', 'status'], queryFn: api.systemStatus, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
   const { data: equityCurve } = useQuery({ queryKey: ['dashboard', 'equity-curve'], queryFn: api.equityCurve, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
+  const { data: portfolioHistory } = useQuery({
+    queryKey: ['dashboard', 'portfolio-history', historyRange],
+    queryFn: () => api.portfolioHistory(historyRange),
+    refetchInterval: REFETCH_INTERVALS.DASHBOARD,
+  });
   const { data: portfolio } = useQuery({ queryKey: ['trading', 'portfolio'], queryFn: api.portfolio, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
   const { data: positions } = useQuery({ queryKey: ['trading', 'positions', 'open'], queryFn: () => api.listPositions('open'), refetchInterval: REFETCH_INTERVALS.DASHBOARD });
   const { data: signals } = useQuery({ queryKey: ['signals', { limit: 10 }], queryFn: () => api.listSignals({ limit: 10 }), refetchInterval: REFETCH_INTERVALS.SIGNALS });
@@ -60,6 +69,9 @@ export function DashboardPage() {
   if (isLoading) return <Spinner />;
 
   const watchedPairs = (status as any)?.watched_pairs ?? 0;
+
+  // Use portfolio-history (per-exchange) if available, fall back to legacy equity curve
+  const hasPortfolioHistory = portfolioHistory && portfolioHistory.length > 0 && portfolioHistory.some(s => s.points.length > 0);
 
   return (
     <div>
@@ -89,11 +101,32 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* Equity Curve + Portfolio Donut */}
+      {/* Portfolio History Chart + Portfolio Donut */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <Card className="lg:col-span-2">
-          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider mb-4">Equity Curve</h3>
-          <EquityCurveChart data={equityCurve ?? []} />
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">Portfolio History</h3>
+            <div className="flex gap-1">
+              {HISTORY_RANGES.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setHistoryRange(r)}
+                  className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                    historyRange === r
+                      ? 'bg-ct-accent text-white'
+                      : 'bg-ct-bg-hover text-ct-text-muted hover:text-ct-text'
+                  }`}
+                >
+                  {r.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          {hasPortfolioHistory ? (
+            <EquityCurveChart series={portfolioHistory!} />
+          ) : (
+            <EquityCurveChart data={equityCurve ?? []} />
+          )}
         </Card>
         <Card>
           <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider mb-4">Portfolio Breakdown</h3>

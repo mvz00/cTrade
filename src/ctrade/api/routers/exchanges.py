@@ -114,6 +114,18 @@ async def add_exchange(
     return ExchangeResponse(**result)
 
 
+@router.patch("/{exchange_id}/toggle", response_model=ExchangeResponse)
+async def toggle_exchange(exchange_id: str) -> ExchangeResponse:
+    """Toggle an exchange between active and inactive."""
+    store = RuntimeConfigStore.get()
+    result = store.toggle_exchange(exchange_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Exchange not found")
+    # Active status change affects available pairs and portfolio
+    MarketDataProvider.get_instance().clear_pairs_cache()
+    return ExchangeResponse(**result)
+
+
 @router.delete("/{exchange_id}", status_code=204)
 async def delete_exchange(exchange_id: str) -> None:
     """Remove an exchange configuration."""

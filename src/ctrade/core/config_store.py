@@ -661,6 +661,21 @@ class RuntimeConfigStore:
                     return ex
             return None
 
+    def toggle_exchange(self, exchange_id: str) -> dict[str, Any] | None:
+        """Toggle ``is_active`` for an exchange.
+
+        Returns the updated public dict, or ``None`` if not found.
+        """
+        with self._data_lock:
+            entry = next((e for e in self._exchanges if e.id == exchange_id), None)
+            if entry is None:
+                return None
+            entry.is_active = not entry.is_active
+            result = entry.to_public_dict()
+        self._save_to_disk()
+        self._save_to_db()
+        return result
+
     def remove_exchange(self, exchange_id: str) -> bool:
         with self._data_lock:
             before = len(self._exchanges)

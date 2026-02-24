@@ -188,6 +188,9 @@ class PortfolioSnapshotModel(Base):
     """Portfolio snapshots (periodic balance tracking)."""
 
     __tablename__ = "portfolio_snapshots"
+    __table_args__ = (
+        Index("ix_snapshots_exchange_mode_time", "exchange_id", "trading_mode", "time"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)

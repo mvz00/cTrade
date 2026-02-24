@@ -46,6 +46,7 @@ import type {
   ConnectionsResponse,
   ConnectionTestResult,
   ConnectionCredentialsRequest,
+  PortfolioHistorySeries,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -104,6 +105,8 @@ export const api = {
   dashboardSummary: () => apiFetch<DashboardSummary>('/dashboard/summary'),
   systemStatus: () => apiFetch<SystemStatus>('/dashboard/status'),
   equityCurve: () => apiFetch<EquityPoint[]>('/dashboard/equity-curve'),
+  portfolioHistory: (range: string = '7d') =>
+    apiFetch<PortfolioHistorySeries[]>(`/dashboard/portfolio-history?range=${range}`),
   recentTrades: () => apiFetch<Position[]>('/dashboard/recent-trades'),
 
   tradingMode: () => apiFetch<TradingModeResponse>('/config/trading-mode'),
@@ -123,6 +126,8 @@ export const api = {
   updateExchange: (id: string, body: ExchangeUpdateRequest) =>
     apiFetch<ExchangeInfo>(`/exchanges/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteExchange: (id: string) => apiFetch<void>(`/exchanges/${id}`, { method: 'DELETE' }),
+  toggleExchange: (id: string) =>
+    apiFetch<ExchangeInfo>(`/exchanges/${id}/toggle`, { method: 'PATCH' }),
   testExchange: (id: string) => apiFetch<ExchangeTestResult>(`/exchanges/${id}/test`, { method: 'POST' }),
 
   listPairs: () => apiFetch<TradingPair[]>('/trading/pairs'),

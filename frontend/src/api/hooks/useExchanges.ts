@@ -47,6 +47,16 @@ export function useDeleteExchange() {
   });
 }
 
+export function useToggleExchange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.toggleExchange(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['exchanges'] });
+    },
+  });
+}
+
 export function useTestExchange() {
   return useMutation({
     mutationFn: (id: string) => api.testExchange(id),

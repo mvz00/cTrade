@@ -60,3 +60,28 @@ class PortfolioRepository(BaseRepository[PortfolioSnapshotModel]):
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_all_snapshots_in_period(
+        self,
+        trading_mode: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[PortfolioSnapshotModel]:
+        """Get portfolio snapshots for ALL exchanges in a time range.
+
+        Returns all snapshots (across exchanges) ordered by time ascending.
+        The caller groups them by ``exchange_id`` as needed.
+        """
+        stmt = (
+            select(PortfolioSnapshotModel)
+            .where(
+                and_(
+                    PortfolioSnapshotModel.trading_mode == trading_mode,
+                    PortfolioSnapshotModel.time >= start,
+                    PortfolioSnapshotModel.time <= end,
+                )
+            )
+            .order_by(PortfolioSnapshotModel.time.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())

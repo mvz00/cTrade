@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import uuid
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -10,6 +14,8 @@ from ctrade.core.config_store import RuntimeConfigStore
 from ctrade.exchange.engine_resolver import get_engine
 from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.strategy.orchestrator import TradingOrchestrator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -155,3 +161,89 @@ async def get_system_status() -> dict[str, Any]:
             "event_bus": {"status": "ok", "label": "Running"},
             "watched_pairs": 0,
         }
+
+
+# ---------- Range string → timedelta mapping ----------
+_RANGE_DELTAS: dict[str, timedelta | None] = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+    "90d": timedelta(days=90),
+    "all": None,  # unbounded — use a very early start
+}
+
+
+@router.get("/portfolio-history")
+async def get_portfolio_history(
+    range: str = Query("7d", pattern="^(24h|7d|30d|90d|all)$"),
+) -> list[dict[str, Any]]:
+    """Return portfolio snapshots grouped by exchange for charting.
+
+    Each item in the list represents one exchange's time series::
+
+        [
+          {
+            "exchange_id": "uuid-string",
+            "exchange_name": "coinspot",
+            "points": [
+              {"timestamp": "2024-01-01T00:00:00+00:00", "total_value_usd": 2750.0},
+              ...
+            ]
+          },
+          ...
+        ]
+    """
+    from ctrade.db.engine import _session_factory
+    from ctrade.db.repositories.portfolio import PortfolioRepository
+
+    if _session_factory is None:
+        return []
+
+    try:
+        store = RuntimeConfigStore.get()
+        trading_mode = store.get_trading().get("mode", "paper")
+    except RuntimeError:
+        return []
+
+    now = datetime.now(timezone.utc)
+    delta = _RANGE_DELTAS.get(range)
+    start = now - delta if delta else datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+    async with _session_factory() as session:
+        repo = PortfolioRepository(session)
+        snapshots = await repo.get_all_snapshots_in_period(
+            trading_mode=trading_mode,
+            start=start,
+            end=now,
+        )
+
+    if not snapshots:
+        return []
+
+    # Build a name lookup from RuntimeConfigStore
+    exchange_names: dict[str, str] = {}
+    try:
+        for ex in store.list_exchanges():
+            raw_id = ex.get("id")
+            ex_uuid = str(raw_id) if raw_id else ""
+            exchange_names[ex_uuid] = ex.get("name", "unknown")
+    except Exception:
+        pass
+
+    # Group snapshots by exchange_id
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for snap in snapshots:
+        eid = str(snap.exchange_id)
+        grouped[eid].append({
+            "timestamp": snap.time.isoformat(),
+            "total_value_usd": float(snap.total_value_usd),
+        })
+
+    return [
+        {
+            "exchange_id": eid,
+            "exchange_name": exchange_names.get(eid, "unknown"),
+            "points": points,
+        }
+        for eid, points in grouped.items()
+    ]
