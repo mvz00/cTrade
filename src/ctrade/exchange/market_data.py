@@ -219,6 +219,7 @@ class MarketDataProvider:
             store = RuntimeConfigStore.get()
             exchanges = store.list_exchanges()
             if not exchanges:
+                logger.warning("_create_ccxt_exchange: no exchanges configured")
                 return None
 
             from ctrade.security.vault import Vault
@@ -226,6 +227,7 @@ class MarketDataProvider:
             settings = get_settings()
             key = settings.encryption_key.get_secret_value()
             if not key:
+                logger.warning("_create_ccxt_exchange: no encryption key")
                 return None
             vault = Vault(key)
 
@@ -234,11 +236,18 @@ class MarketDataProvider:
             else:
                 entry = store.get_exchange_entry(exchanges[0]["id"])
             if not entry:
+                logger.warning("_create_ccxt_exchange: entry not found for id=%s", exchange_id)
                 return None
 
             import ccxt.async_support as ccxt_async
             exchange_class = getattr(ccxt_async, entry.name, None)
             if not exchange_class:
+                # Try lowercase fallback (ccxt uses lowercase class names)
+                exchange_class = getattr(ccxt_async, entry.name.lower(), None)
+            if not exchange_class:
+                logger.warning(
+                    "_create_ccxt_exchange: ccxt has no class for '%s'", entry.name
+                )
                 return None
 
             api_key = vault.decrypt(entry.api_key_encrypted)
@@ -253,7 +262,7 @@ class MarketDataProvider:
 
             return exchange_class(config)
         except Exception as e:
-            logger.debug("Failed to create ccxt exchange: %s", e)
+            logger.warning("Failed to create ccxt exchange (id=%s): %s", exchange_id, e)
             return None
 
     async def _try_ccxt_ticker(self, symbol: str) -> Ticker | None:
@@ -464,8 +473,16 @@ class MarketDataProvider:
         merged: dict[str, float] = {}
         any_success = False
 
+        logger.info(
+            "fetch_exchange_balance: querying %d exchange(s): %s",
+            len(exchanges_list),
+            [ex.get("name", "?") for ex in exchanges_list],
+        )
+
         for ex_info in exchanges_list:
+            ex_name = ex_info.get("name", "?")
             if not ex_info.get("is_active", True):
+                logger.info("Skipping inactive exchange: %s", ex_name)
                 continue
 
             ccxt_ok = False
@@ -474,21 +491,32 @@ class MarketDataProvider:
                 try:
                     raw = await exchange.fetch_balance()
                     free: dict[str, Any] = raw.get("free", {})
+                    count = 0
                     for cur, amt in free.items():
                         if amt and float(amt) > 0:
                             merged[cur] = merged.get(cur, 0.0) + float(amt)
+                            count += 1
+                    logger.info(
+                        "ccxt fetch_balance OK for %s: %d non-zero currencies",
+                        ex_name, count,
+                    )
                     any_success = True
                     ccxt_ok = True
                 except Exception as e:
                     logger.warning(
                         "ccxt fetch_balance failed for %s: %s",
-                        ex_info.get("name", "?"), e,
+                        ex_name, e,
                     )
                 finally:
                     await exchange.close()
+            else:
+                logger.warning(
+                    "ccxt exchange creation failed for %s (id=%s)",
+                    ex_name, ex_info.get("id", "?"),
+                )
 
             # Fallback: CoinSpot native API when ccxt fails
-            if not ccxt_ok and ex_info.get("name", "").lower() == "coinspot":
+            if not ccxt_ok and ex_name.lower() == "coinspot":
                 logger.info("Trying CoinSpot native API for balance...")
                 entry = store.get_exchange_entry(ex_info["id"])
                 if entry:
@@ -507,8 +535,21 @@ class MarketDataProvider:
                             for cur, amt in native_bal.items():
                                 merged[cur] = merged.get(cur, 0.0) + amt
                             any_success = True
+                            logger.info(
+                                "CoinSpot native API OK: %d currencies, total keys: %s",
+                                len(native_bal), list(native_bal.keys())[:10],
+                            )
+                        else:
+                            logger.warning("CoinSpot native API returned None")
                     except Exception as e:
                         logger.warning("CoinSpot native fallback failed: %s", e)
+                else:
+                    logger.warning("CoinSpot entry not found for native fallback")
+
+        logger.info(
+            "fetch_exchange_balance result: success=%s, currencies=%s",
+            any_success, list(merged.keys()) if merged else "empty",
+        )
 
         return merged if any_success else None
 
@@ -523,7 +564,13 @@ class MarketDataProvider:
         """
         balances = await self.fetch_exchange_balance()
         if balances is None:
+            logger.warning("fetch_exchange_portfolio: balance fetch returned None")
             return None
+
+        logger.info(
+            "fetch_exchange_portfolio: pricing %d currencies: %s",
+            len(balances), list(balances.keys()),
+        )
 
         # Stablecoins and fiat treated as USD-equivalent
         _CASH_CURRENCIES = {
