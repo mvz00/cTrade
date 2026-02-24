@@ -160,7 +160,7 @@ export function ConnectionsPage() {
         {connections?.map((conn) => {
           const isEditing = editingName === conn.name;
           const hasCredentialFields = conn.credential_fields.length > 0;
-          const isExchange = conn.name === 'Exchange (ccxt)';
+          const isExchange = conn.name === 'Exchange (ccxt)' || conn.name.startsWith('Exchange: ');
           const showEditButton = conn.requires_key && hasCredentialFields && !isExchange;
           const showManageButton = isExchange;
           const hasNonEmptyValues = Object.values(credentialValues).some((v) => v.trim());

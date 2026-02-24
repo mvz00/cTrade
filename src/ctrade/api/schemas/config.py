@@ -78,14 +78,20 @@ class ExchangeAddRequest(BaseModel):
     api_key: str = Field(min_length=1)
     api_secret: str = Field(min_length=1)
     passphrase: str | None = None
+    quote_currencies: list[str] | None = None
+    max_portfolio_pct: float | None = Field(None, gt=0, le=1)
+    risk_overrides: dict[str, float] | None = None
 
 
 class ExchangeUpdateRequest(BaseModel):
-    """Update exchange credentials — only provided fields are updated."""
+    """Update exchange credentials and settings — only provided fields are updated."""
 
     api_key: str | None = None
     api_secret: str | None = None
     passphrase: str | None = None
+    quote_currencies: list[str] | None = None
+    max_portfolio_pct: float | None = Field(None, gt=0, le=1)
+    risk_overrides: dict[str, float] | None = None
 
 
 class ExchangeResponse(BaseModel):
@@ -94,6 +100,9 @@ class ExchangeResponse(BaseModel):
     exchange_type: str
     is_active: bool
     created_at: str
+    quote_currencies: list[str] = ["USDT"]
+    max_portfolio_pct: float = 1.0
+    risk_overrides: dict[str, float] = {}
 
 
 class ExchangeTestResponse(BaseModel):

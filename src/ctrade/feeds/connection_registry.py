@@ -182,6 +182,35 @@ _CONNECTIONS: list[ConnectionDef] = [
 ]
 
 
+def _get_exchange_connections() -> list[ConnectionDef]:
+    """Generate dynamic ConnectionDefs for each configured exchange.
+
+    Returns one entry per exchange (e.g. "Exchange: Kraken",
+    "Exchange: CoinSpot") so the Connections page shows each exchange
+    individually with its own status and test button.
+    """
+    try:
+        from ctrade.core.config_store import RuntimeConfigStore
+        store = RuntimeConfigStore.get()
+        exchanges = store.list_exchanges()
+    except RuntimeError:
+        return []
+
+    defs: list[ConnectionDef] = []
+    for ex in exchanges:
+        name = ex.get("name", "unknown")
+        quotes = ex.get("quote_currencies", ["USDT"])
+        defs.append(ConnectionDef(
+            name=f"Exchange: {name.capitalize()}",
+            feed_name=f"exchange_{name}",
+            base_urls=[],
+            requires_key=True,
+            key_env_var="(configured via Exchange settings)",
+            description=f"{name.capitalize()} — {', '.join(quotes)} pairs",
+        ))
+    return defs
+
+
 def get_connection_def(name: str) -> ConnectionDef | None:
     """Look up a connection definition by name."""
     return next((c for c in _CONNECTIONS if c.name == name), None)
@@ -197,6 +226,9 @@ def get_all_connection_statuses() -> list[ConnectionStatus]:
 
     This reads cached state from feed singletons and settings — it makes
     NO external HTTP calls and is safe to call on every request.
+
+    In addition to static connections, generates one entry per configured
+    exchange so each exchange appears individually on the Connections page.
     """
     from ctrade.settings import get_settings
 
@@ -206,28 +238,23 @@ def get_all_connection_statuses() -> list[ConnectionStatus]:
     # Build a map of feed_name → (enabled, healthy, last_fetch_time)
     feed_info = _get_feed_info()
 
+    # -- Static connections (data feeds, etc.) --
     for conn in _CONNECTIONS:
-        # Check if the required API key is configured
+        # Skip the generic "Exchange (ccxt)" — we replace it with per-exchange entries
+        if conn.name == "Exchange (ccxt)":
+            continue
+
         key_configured = True
-        if conn.requires_key:
-            if conn.name == "Exchange (ccxt)":
-                from ctrade.core.config_store import RuntimeConfigStore
-                try:
-                    store = RuntimeConfigStore.get()
-                    key_configured = bool(store.list_exchanges())
-                except RuntimeError:
-                    key_configured = False
-            elif conn.key_env_var:
-                key_configured = bool(
-                    _get_secret_value(settings, conn.key_env_var, connection_name=conn.name)
-                )
+        if conn.requires_key and conn.key_env_var:
+            key_configured = bool(
+                _get_secret_value(settings, conn.key_env_var, connection_name=conn.name)
+            )
 
         fi = feed_info.get(conn.feed_name)
         feed_enabled = fi["enabled"] if fi else False
         feed_healthy = fi["healthy"] if fi else False
         last_checked = fi["last_checked"] if fi else None
 
-        # Determine status
         if conn.requires_key and not key_configured:
             status = "disabled"
         elif not feed_enabled:
@@ -256,6 +283,25 @@ def get_all_connection_statuses() -> list[ConnectionStatus]:
                     {"key": f.key, "label": f.label, "is_secret": f.is_secret}
                     for f in conn.credential_fields
                 ],
+            )
+        )
+
+    # -- Per-exchange entries (dynamic) --
+    for ex_conn in _get_exchange_connections():
+        statuses.append(
+            ConnectionStatus(
+                name=ex_conn.name,
+                feed_name=ex_conn.feed_name,
+                base_urls=ex_conn.base_urls,
+                requires_key=True,
+                key_configured=True,  # already configured on Exchanges page
+                feed_enabled=True,
+                feed_healthy=True,
+                status="ok",
+                last_checked=None,
+                error_message=None,
+                description=ex_conn.description,
+                credential_fields=[],
             )
         )
 
@@ -361,9 +407,9 @@ async def test_connection(name: str) -> ConnectionTestResult:
     """
     now = datetime.now(timezone.utc).isoformat()
 
-    # Special case: Exchange (ccxt) — test via ccxt, not HTTP
-    if name == "Exchange (ccxt)":
-        return await _test_exchange_connection(now)
+    # Special case: Exchange entries — test via ccxt, not HTTP
+    if name == "Exchange (ccxt)" or name.startswith("Exchange: "):
+        return await _test_exchange_connection(name, now)
 
     probe_url = _TEST_PROBES.get(name)
     if not probe_url:
@@ -440,26 +486,57 @@ async def test_connection(name: str) -> ConnectionTestResult:
         )
 
 
-async def _test_exchange_connection(tested_at: str) -> ConnectionTestResult:
-    """Test the configured exchange connection via ccxt."""
+async def _test_exchange_connection(name: str, tested_at: str) -> ConnectionTestResult:
+    """Test an exchange connection via ccxt.
+
+    If ``name`` is ``"Exchange: kraken"`` etc., tests that specific exchange.
+    Otherwise tests the first configured exchange.
+    """
     start = time.monotonic()
     try:
+        from ctrade.core.config_store import RuntimeConfigStore
         from ctrade.exchange.market_data import MarketDataProvider
+
         provider = MarketDataProvider.get_instance()
-        exchange = await provider._create_ccxt_exchange()
-        await exchange.close()
-        latency = int((time.monotonic() - start) * 1000)
-        return ConnectionTestResult(
-            name="Exchange (ccxt)",
-            success=True,
-            latency_ms=latency,
-            message=f"Exchange connected ({latency}ms)",
-            tested_at=tested_at,
-        )
+
+        # Resolve exchange_id from the connection name
+        exchange_id = None
+        if name.startswith("Exchange: "):
+            exchange_name = name.split("Exchange: ", 1)[1].lower()
+            try:
+                store = RuntimeConfigStore.get()
+                for ex in store.list_exchanges():
+                    if ex.get("name", "").lower() == exchange_name:
+                        exchange_id = ex["id"]
+                        break
+            except RuntimeError:
+                pass
+
+        exchange = await provider._create_ccxt_exchange(exchange_id)
+        if exchange is None:
+            return ConnectionTestResult(
+                name=name,
+                success=False,
+                latency_ms=0,
+                message="Could not create exchange instance (check API keys)",
+                tested_at=tested_at,
+            )
+        try:
+            markets = await exchange.load_markets()
+            latency = int((time.monotonic() - start) * 1000)
+            return ConnectionTestResult(
+                name=name,
+                success=True,
+                latency_ms=latency,
+                message=f"Connected — {len(markets)} markets ({latency}ms)",
+                tested_at=tested_at,
+            )
+        finally:
+            await exchange.close()
     except Exception as exc:
         latency = int((time.monotonic() - start) * 1000)
         return ConnectionTestResult(
-            name="Exchange (ccxt)",
+            name=name,
             success=False,
             latency_ms=latency,
             message=str(exc),

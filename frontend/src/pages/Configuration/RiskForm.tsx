@@ -57,12 +57,15 @@ export function RiskForm() {
 
   return (
     <Card>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-1">
         <div className="p-2 rounded-lg bg-ct-red/10">
           <Shield size={18} className="text-ct-red" />
         </div>
         <CardTitle className="mb-0">Risk Management</CardTitle>
       </div>
+      <p className="text-xs text-ct-text-dim mb-4 ml-12">
+        Global defaults — can be overridden per exchange
+      </p>
 
       <div className="space-y-3">
         <NumberInput

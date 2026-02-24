@@ -44,6 +44,10 @@ class ExchangeEntry:
     passphrase_encrypted: bytes | None
     is_active: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # --- Per-exchange settings ---
+    quote_currencies: list[str] = field(default_factory=lambda: ["USDT"])
+    max_portfolio_pct: float = 1.0  # max % of exchange balance cTrade can use
+    risk_overrides: dict[str, float] = field(default_factory=dict)
 
     def to_public_dict(self) -> dict[str, Any]:
         """Return a dict safe to expose via the API (no credentials)."""
@@ -53,6 +57,9 @@ class ExchangeEntry:
             "exchange_type": self.exchange_type,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat(),
+            "quote_currencies": self.quote_currencies,
+            "max_portfolio_pct": self.max_portfolio_pct,
+            "risk_overrides": self.risk_overrides,
         }
 
 
@@ -161,6 +168,9 @@ class RuntimeConfigStore:
                         ),
                         "is_active": ex.is_active,
                         "created_at": ex.created_at.isoformat(),
+                        "quote_currencies": ex.quote_currencies,
+                        "max_portfolio_pct": ex.max_portfolio_pct,
+                        "risk_overrides": ex.risk_overrides,
                     }
                     exchanges_data.append(ex_dict)
 
@@ -222,6 +232,9 @@ class RuntimeConfigStore:
                     ),
                     "is_active": ex.is_active,
                     "created_at": ex.created_at.isoformat(),
+                    "quote_currencies": ex.quote_currencies,
+                    "max_portfolio_pct": ex.max_portfolio_pct,
+                    "risk_overrides": ex.risk_overrides,
                 }
                 exchanges_data.append(ex_dict)
 
@@ -328,6 +341,9 @@ class RuntimeConfigStore:
                             ),
                             is_active=ex_data.get("is_active", True),
                             created_at=datetime.fromisoformat(ex_data["created_at"]),
+                            quote_currencies=ex_data.get("quote_currencies", ["USDT"]),
+                            max_portfolio_pct=ex_data.get("max_portfolio_pct", 1.0),
+                            risk_overrides=ex_data.get("risk_overrides", {}),
                         )
                         restored.append(entry)
                     except Exception:
@@ -413,6 +429,9 @@ class RuntimeConfigStore:
                             ),
                             is_active=ex_data.get("is_active", True),
                             created_at=datetime.fromisoformat(ex_data["created_at"]),
+                            quote_currencies=ex_data.get("quote_currencies", ["USDT"]),
+                            max_portfolio_pct=ex_data.get("max_portfolio_pct", 1.0),
+                            risk_overrides=ex_data.get("risk_overrides", {}),
                         )
                         restored.append(entry)
                     except Exception:
@@ -501,6 +520,21 @@ class RuntimeConfigStore:
         self._save_to_db()
         return result
 
+    def get_effective_risk(self, exchange_id: str | None = None) -> dict[str, Any]:
+        """Return risk config with per-exchange overrides applied.
+
+        Starts from the global risk defaults, then overlays any overrides
+        defined on the specific exchange entry.  If ``exchange_id`` is None
+        or the exchange has no overrides, returns the global defaults.
+        """
+        with self._data_lock:
+            base = dict(self._risk)
+            if exchange_id:
+                entry = next((e for e in self._exchanges if e.id == exchange_id), None)
+                if entry and entry.risk_overrides:
+                    base.update(entry.risk_overrides)
+            return base
+
     # ---- Feed credential management ----
 
     def get_feed_credential(self, connection_name: str, field_key: str) -> bytes | None:
@@ -560,6 +594,9 @@ class RuntimeConfigStore:
         api_secret: str,
         vault: Vault,
         passphrase: str | None = None,
+        quote_currencies: list[str] | None = None,
+        max_portfolio_pct: float = 1.0,
+        risk_overrides: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         entry = ExchangeEntry(
             id=str(uuid.uuid4()),
@@ -568,6 +605,9 @@ class RuntimeConfigStore:
             api_key_encrypted=vault.encrypt(api_key),
             api_secret_encrypted=vault.encrypt(api_secret),
             passphrase_encrypted=vault.encrypt(passphrase) if passphrase else None,
+            quote_currencies=quote_currencies or ["USDT"],
+            max_portfolio_pct=max_portfolio_pct,
+            risk_overrides=risk_overrides or {},
         )
         with self._data_lock:
             self._exchanges.append(entry)
@@ -583,10 +623,13 @@ class RuntimeConfigStore:
         api_key: str | None = None,
         api_secret: str | None = None,
         passphrase: str | None = None,
+        quote_currencies: list[str] | None = None,
+        max_portfolio_pct: float | None = None,
+        risk_overrides: dict[str, float] | None = None,
     ) -> dict[str, Any] | None:
-        """Update credentials for an existing exchange.
+        """Update credentials and settings for an existing exchange.
 
-        Only non-None, non-empty fields are re-encrypted and updated.
+        Only non-None, non-empty fields are re-encrypted/updated.
         Returns the public dict on success, or None if not found.
         """
         with self._data_lock:
@@ -600,6 +643,12 @@ class RuntimeConfigStore:
             if passphrase is not None:
                 # Allow clearing passphrase with empty string
                 entry.passphrase_encrypted = vault.encrypt(passphrase) if passphrase else None
+            if quote_currencies is not None:
+                entry.quote_currencies = quote_currencies
+            if max_portfolio_pct is not None:
+                entry.max_portfolio_pct = max_portfolio_pct
+            if risk_overrides is not None:
+                entry.risk_overrides = risk_overrides
             result = entry.to_public_dict()
         self._save_to_disk()
         self._save_to_db()

@@ -12,10 +12,11 @@ interface Segment {
 }
 
 export function PortfolioDonut({ portfolio }: PortfolioDonutProps) {
-  const cash = portfolio.cash_balance?.['USDT'] ?? portfolio.cash_balance?.['USD'] ?? 0;
   const positionsValue = portfolio.positions_value ?? 0;
   const unrealizedPnl = portfolio.unrealized_pnl ?? 0;
-  const total = portfolio.total_value_usd ?? cash + positionsValue;
+  const total = portfolio.total_value_usd ?? 0;
+  // Derive cash from total minus positions (accurate across all currencies)
+  const cash = Math.max(0, total - positionsValue);
 
   // Build segments — skip zero-value ones
   const segments: Segment[] = [];

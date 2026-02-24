@@ -20,19 +20,54 @@ from ctrade.core.models import Candle, Ticker
 
 logger = logging.getLogger(__name__)
 
-# Seed prices for simulated pairs
-_SEED_PRICES: dict[str, float] = {
-    "BTC/USDT": 67000.0,
-    "ETH/USDT": 3500.0,
-    "SOL/USDT": 145.0,
-    "BNB/USDT": 580.0,
-    "XRP/USDT": 0.62,
-    "ADA/USDT": 0.45,
-    "DOGE/USDT": 0.082,
-    "DOT/USDT": 7.20,
-    "AVAX/USDT": 35.0,
-    "LINK/USDT": 14.50,
+# Top ~50 coins with approximate USD prices for seed/simulation data.
+# Used to dynamically generate trading pairs for any quote currency.
+_TOP_COINS: dict[str, float] = {
+    "BTC": 67000.0, "ETH": 3500.0, "SOL": 145.0, "BNB": 580.0,
+    "XRP": 0.62, "ADA": 0.45, "DOGE": 0.082, "DOT": 7.20,
+    "AVAX": 35.0, "LINK": 14.50, "MATIC": 0.58, "UNI": 9.80,
+    "SHIB": 0.000009, "LTC": 72.0, "ATOM": 8.50, "FIL": 5.80,
+    "NEAR": 5.20, "APT": 8.90, "ARB": 1.10, "OP": 2.30,
+    "SUI": 1.05, "SEI": 0.42, "INJ": 22.0, "TIA": 8.50,
+    "PEPE": 0.0000085, "WIF": 2.10, "FET": 1.60, "RENDER": 6.80,
+    "GRT": 0.22, "AAVE": 95.0, "MKR": 1500.0, "CRV": 0.55,
+    "ALGO": 0.18, "VET": 0.028, "SAND": 0.42, "MANA": 0.38,
+    "AXS": 7.50, "HBAR": 0.075, "FTM": 0.35, "THETA": 1.10,
+    "XLM": 0.11, "ICP": 12.0, "TRX": 0.12, "EOS": 0.78,
+    "FLOW": 0.72, "CHZ": 0.068, "IMX": 1.80, "GALA": 0.028,
+    "1INCH": 0.35, "SUSHI": 1.10, "COMP": 52.0,
 }
+
+# Approximate USD → quote currency conversion rates.
+_QUOTE_RATES: dict[str, float] = {
+    "USDT": 1.0, "USDC": 1.0, "USD": 1.0,
+    "BTC": 1.0 / 67000.0,
+    "AUD": 1.54,
+    "EUR": 0.92,
+}
+
+
+def _generate_seed_pairs(quotes: set[str] | None = None) -> dict[str, float]:
+    """Generate seed pairs by combining top coins with quote currencies.
+
+    For each coin in ``_TOP_COINS`` and each requested quote currency,
+    produces a ``BASE/QUOTE`` pair with a realistic approximate price.
+    Self-pairs (e.g. BTC/BTC) are excluded.
+    """
+    if quotes is None:
+        quotes = set(_QUOTE_RATES.keys())
+    pairs: dict[str, float] = {}
+    for base, usd_price in _TOP_COINS.items():
+        for quote in quotes:
+            if base == quote:
+                continue
+            rate = _QUOTE_RATES.get(quote, 1.0)
+            pairs[f"{base}/{quote}"] = round(usd_price * rate, 8)
+    return pairs
+
+
+# Pre-generate seed prices for all known quote currencies (~250 pairs).
+_SEED_PRICES: dict[str, float] = _generate_seed_pairs()
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30,
@@ -66,42 +101,85 @@ class MarketDataProvider:
             cls._instance = None
 
     async def get_available_pairs(self) -> list[str]:
-        """Return available trading pairs from the configured exchange.
+        """Return available trading pairs from ALL configured exchanges.
 
-        Fetches all USDT-quoted spot pairs via ``load_markets()`` on first
-        call and caches the result.  Falls back to the simulated seed list
-        when no exchange is configured.
+        For each exchange, loads markets and filters by that exchange's
+        configured ``quote_currencies``.  Returns the sorted union of all
+        pairs.  Falls back to the simulated seed list when no exchange is
+        configured.
         """
         # Return cache if available
         if self._cached_exchange_pairs is not None:
             return self._cached_exchange_pairs
 
-        exchange = await self._create_ccxt_exchange()
-        if not exchange:
+        from ctrade.core.config_store import RuntimeConfigStore
+        try:
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
             return list(_SEED_PRICES.keys())
 
-        try:
-            markets = await exchange.load_markets()
-            pairs: list[str] = sorted(
-                symbol
-                for symbol, info in markets.items()
-                if (
-                    info.get("quote") == "USDT"
-                    and info.get("active", True)
-                    and info.get("spot", True)
+        if not exchanges_list:
+            return list(_SEED_PRICES.keys())
+
+        all_pairs: set[str] = set()
+        all_configured_quotes: set[str] = set()
+
+        for ex_info in exchanges_list:
+            if not ex_info.get("is_active", True):
+                continue
+            entry = store.get_exchange_entry(ex_info["id"])
+            if not entry:
+                continue
+
+            quote_currencies = set(entry.quote_currencies)
+            all_configured_quotes.update(quote_currencies)
+
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if not exchange:
+                logger.warning(
+                    "Could not create ccxt instance for %s — "
+                    "seed pairs will be used for its quote currencies",
+                    entry.name,
                 )
+                continue
+            try:
+                markets = await exchange.load_markets()
+                for symbol, info in markets.items():
+                    if (
+                        info.get("quote") in quote_currencies
+                        and info.get("active", True)
+                        and info.get("spot", True)
+                    ):
+                        all_pairs.add(symbol)
+            except Exception as e:
+                logger.warning(
+                    "Failed to load markets from %s: %s — "
+                    "seed pairs will be used for its quote currencies",
+                    entry.name, e,
+                )
+            finally:
+                await exchange.close()
+
+        # Supplement with seed pairs for ALL configured quote currencies.
+        # This ensures paper trading always has pairs available even when
+        # ccxt fails to load markets from an exchange.
+        for symbol in _SEED_PRICES:
+            quote = symbol.split("/")[1]
+            if quote in all_configured_quotes:
+                all_pairs.add(symbol)
+
+        if all_pairs:
+            pairs = sorted(all_pairs)
+            self._cached_exchange_pairs = pairs
+            logger.info(
+                "Loaded %d pairs for quote currencies %s",
+                len(pairs), sorted(all_configured_quotes),
             )
-            if pairs:
-                self._cached_exchange_pairs = pairs
-                logger.info("Loaded %d USDT pairs from exchange", len(pairs))
-                return pairs
-            # Exchange returned no matching pairs — fall back
-            return list(_SEED_PRICES.keys())
-        except Exception as e:
-            logger.debug("Failed to load exchange markets: %s", e)
-            return list(_SEED_PRICES.keys())
-        finally:
-            await exchange.close()
+            return pairs
+
+        # No pairs from any exchange — fall back to full simulated list
+        return list(_SEED_PRICES.keys())
 
     def clear_pairs_cache(self) -> None:
         """Clear the cached exchange pairs (e.g. after exchange config change)."""
@@ -125,8 +203,11 @@ class MarketDataProvider:
             return candles
         return self._simulated_candles(symbol, timeframe, limit)
 
-    async def _create_ccxt_exchange(self) -> Any | None:
-        """Create an async ccxt exchange instance from the first configured exchange.
+    async def _create_ccxt_exchange(self, exchange_id: str | None = None) -> Any | None:
+        """Create an async ccxt exchange instance.
+
+        If ``exchange_id`` is provided, uses that specific exchange.
+        Otherwise, uses the first configured exchange (backward compatible).
 
         Returns the exchange object (caller must call ``await exchange.close()``),
         or ``None`` if no exchange is configured.
@@ -146,7 +227,10 @@ class MarketDataProvider:
                 return None
             vault = Vault(key)
 
-            entry = store.get_exchange_entry(exchanges[0]["id"])
+            if exchange_id:
+                entry = store.get_exchange_entry(exchange_id)
+            else:
+                entry = store.get_exchange_entry(exchanges[0]["id"])
             if not entry:
                 return None
 
@@ -171,28 +255,48 @@ class MarketDataProvider:
             return None
 
     async def _try_ccxt_ticker(self, symbol: str) -> Ticker | None:
-        """Try to fetch ticker from a configured exchange."""
-        exchange = await self._create_ccxt_exchange()
-        if not exchange:
-            return None
+        """Try to fetch ticker from ALL configured exchanges.
+
+        Iterates every active exchange until one successfully returns
+        a ticker for ``symbol``.  Returns ``None`` only if every
+        exchange fails.
+        """
+        from ctrade.core.config_store import RuntimeConfigStore
         try:
-            data = await exchange.fetch_ticker(symbol)
-            return Ticker(
-                pair_symbol=symbol,
-                last_price=Decimal(str(data.get("last", 0))),
-                bid=Decimal(str(data.get("bid", 0) or 0)),
-                ask=Decimal(str(data.get("ask", 0) or 0)),
-                high_24h=Decimal(str(data.get("high", 0) or 0)),
-                low_24h=Decimal(str(data.get("low", 0) or 0)),
-                volume_24h=Decimal(str(data.get("baseVolume", 0) or 0)),
-                change_pct_24h=float(data.get("percentage", 0) or 0),
-                timestamp=datetime.now(timezone.utc),
-            )
-        except Exception as e:
-            logger.debug("ccxt ticker fetch failed for %s: %s", symbol, e)
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
             return None
-        finally:
-            await exchange.close()
+
+        if not exchanges_list:
+            return None
+
+        for ex_info in exchanges_list:
+            if not ex_info.get("is_active", True):
+                continue
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if not exchange:
+                continue
+            try:
+                data = await exchange.fetch_ticker(symbol)
+                return Ticker(
+                    pair_symbol=symbol,
+                    last_price=Decimal(str(data.get("last", 0))),
+                    bid=Decimal(str(data.get("bid", 0) or 0)),
+                    ask=Decimal(str(data.get("ask", 0) or 0)),
+                    high_24h=Decimal(str(data.get("high", 0) or 0)),
+                    low_24h=Decimal(str(data.get("low", 0) or 0)),
+                    volume_24h=Decimal(str(data.get("baseVolume", 0) or 0)),
+                    change_pct_24h=float(data.get("percentage", 0) or 0),
+                    timestamp=datetime.now(timezone.utc),
+                )
+            except Exception:
+                pass  # try next exchange
+            finally:
+                await exchange.close()
+
+        logger.debug("ccxt ticker fetch failed for %s on all exchanges", symbol)
+        return None
 
     async def _try_ccxt_candles(
         self, symbol: str, timeframe: str, limit: int
@@ -226,28 +330,48 @@ class MarketDataProvider:
     # ---- Live exchange balance ----
 
     async def fetch_exchange_balance(self) -> dict[str, float] | None:
-        """Fetch real account balances from the configured exchange.
+        """Fetch real account balances from ALL configured exchanges.
 
-        Returns ``{currency: free_amount}`` for non-zero balances,
-        or ``None`` if no exchange is configured or the fetch fails.
+        Iterates every active exchange, fetches its free balances via ccxt,
+        and merges them into a single ``{currency: total_amount}`` dict.
+        If the same currency exists on multiple exchanges the amounts are
+        summed.  Returns ``None`` only if *no* exchange could be queried.
         """
-        exchange = await self._create_ccxt_exchange()
-        if not exchange:
-            return None
+        from ctrade.core.config_store import RuntimeConfigStore
         try:
-            raw = await exchange.fetch_balance()
-            # raw["free"] is {currency: amount} — filter out zero balances
-            free: dict[str, Any] = raw.get("free", {})
-            return {
-                cur: float(amt)
-                for cur, amt in free.items()
-                if amt and float(amt) > 0
-            }
-        except Exception as e:
-            logger.warning("Failed to fetch exchange balance: %s", e)
+            store = RuntimeConfigStore.get()
+            exchanges_list = store.list_exchanges()
+        except RuntimeError:
             return None
-        finally:
-            await exchange.close()
+
+        if not exchanges_list:
+            return None
+
+        merged: dict[str, float] = {}
+        any_success = False
+
+        for ex_info in exchanges_list:
+            if not ex_info.get("is_active", True):
+                continue
+            exchange = await self._create_ccxt_exchange(ex_info["id"])
+            if not exchange:
+                continue
+            try:
+                raw = await exchange.fetch_balance()
+                free: dict[str, Any] = raw.get("free", {})
+                for cur, amt in free.items():
+                    if amt and float(amt) > 0:
+                        merged[cur] = merged.get(cur, 0.0) + float(amt)
+                any_success = True
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch balance from %s: %s",
+                    ex_info.get("name", "?"), e,
+                )
+            finally:
+                await exchange.close()
+
+        return merged if any_success else None
 
     async def fetch_exchange_portfolio(self) -> dict[str, Any] | None:
         """Build a portfolio summary from real exchange balances.
@@ -255,8 +379,8 @@ class MarketDataProvider:
         Returns a dict compatible with the ``PortfolioResponse`` schema,
         or ``None`` if the balance fetch fails.
 
-        Uses only real exchange tickers for pricing (never simulated fallback)
-        to avoid inflating dust balances with fake prices.
+        Tries real exchange tickers first (across all exchanges), then
+        falls back to seed prices for approximate valuation.
         """
         balances = await self.fetch_exchange_balance()
         if balances is None:
@@ -283,21 +407,39 @@ class MarketDataProvider:
                 rate = _FIAT_TO_USD.get(currency, 1.0)
                 cash_value += amount * rate
             else:
-                # Convert to USD using REAL exchange ticker only
-                # (never fall back to simulated prices for portfolio valuation)
+                # Try to convert to USD via real exchange ticker
                 symbol = f"{currency}/USDT"
                 try:
                     ticker = await self._try_ccxt_ticker(symbol)
                     if ticker is None:
-                        # Try with /USD pair (common on Kraken)
                         ticker = await self._try_ccxt_ticker(f"{currency}/USD")
                     if ticker is None:
-                        logger.debug(
-                            "No real ticker for %s (amount=%.8f), skipping",
-                            currency, amount,
+                        ticker = await self._try_ccxt_ticker(f"{currency}/AUD")
+                    if ticker is not None:
+                        price = float(ticker.last_price)
+                        # AUD ticker → convert to USD
+                        if ticker.pair_symbol.endswith("/AUD"):
+                            price *= _FIAT_TO_USD.get("AUD", 0.65)
+                        usd_value = amount * price
+                    else:
+                        # Fallback: use seed price for approximate valuation
+                        seed_price = _SEED_PRICES.get(
+                            f"{currency}/USDT",
+                            _SEED_PRICES.get(f"{currency}/USD", 0),
                         )
-                        continue
-                    usd_value = amount * float(ticker.last_price)
+                        if seed_price > 0:
+                            usd_value = amount * seed_price
+                            logger.info(
+                                "Using seed price for %s (%.8f × $%.2f = $%.2f)",
+                                currency, amount, seed_price, usd_value,
+                            )
+                        else:
+                            logger.debug(
+                                "No price for %s (amount=%.8f), skipping",
+                                currency, amount,
+                            )
+                            continue
+
                     # Skip dust (< $0.01)
                     if usd_value < 0.01:
                         continue

@@ -166,7 +166,7 @@ export function TradingPage() {
   }
 
   // Select All: operates on the currently visible (filtered + sliced) pairs
-  const visiblePairs = filteredUnwatched.slice(0, 50);
+  const visiblePairs = filteredUnwatched.slice(0, 200);
   const allVisibleSelected = visiblePairs.length > 0 && visiblePairs.every(p => selectedNewPairs.has(p));
   const someVisibleSelected = visiblePairs.some(p => selectedNewPairs.has(p));
 
@@ -373,7 +373,7 @@ export function TradingPage() {
             <span className="text-xs text-ct-text-muted uppercase">Cash</span>
           </div>
           <div className="text-lg font-semibold text-ct-text">
-            {formatUSD(portfolio?.cash_balance?.USDT ?? 0)}
+            {formatUSD(Object.values(portfolio?.cash_balance ?? {}).reduce((s, v) => s + v, 0))}
           </div>
         </Card>
         <Card>
@@ -414,7 +414,7 @@ export function TradingPage() {
             )}
             {(pairs || []).map(p => (
               <span key={p.symbol} className="inline-flex items-center gap-1 bg-ct-bg-hover rounded px-2 py-0.5 text-xs font-mono text-ct-text">
-                {p.symbol.replace('/USDT', '')}
+                {p.symbol}
                 <button
                   onClick={() => removePair.mutate(p.symbol)}
                   className="text-ct-text-dim hover:text-ct-red"
