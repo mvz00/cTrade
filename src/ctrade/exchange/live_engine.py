@@ -124,6 +124,7 @@ class LiveEngine:
         justification: str = "",
         stop_loss: float | None = None,
         take_profit: float | None = None,
+        exchange_name: str = "",
     ) -> Order:
         """Place a real order on the exchange via ccxt."""
         from ctrade.core.config_store import RuntimeConfigStore

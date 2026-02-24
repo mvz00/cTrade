@@ -122,18 +122,20 @@ class PaperEngine:
         justification: str = "",
         stop_loss: float | None = None,
         take_profit: float | None = None,
+        exchange_name: str = "paper",
     ) -> Order:
         """Place an order. Market orders fill immediately."""
         from ctrade.exchange.market_data import MarketDataProvider
 
         market = MarketDataProvider.get_instance()
-        current_price = market.get_current_price(symbol)
+        # Use provided price (from orchestrator's real ticker) if available
+        current_price = price if price is not None else market.get_current_price(symbol)
 
         order = Order(
             id=uuid.uuid4(),
             signal_id=uuid.UUID(signal_id) if signal_id else None,
             pair_symbol=symbol,
-            exchange_name="paper",
+            exchange_name=exchange_name,
             trading_mode=TradingMode.PAPER,
             order_type=OrderType(order_type),
             side=OrderSide(side),
@@ -197,7 +199,7 @@ class PaperEngine:
                 self._orders.append(order)
 
                 # Update positions
-                self._update_positions(order, strategy_name, justification, stop_loss, take_profit)
+                self._update_positions(order, strategy_name, justification, stop_loss, take_profit, exchange_name)
                 # Record equity
                 self._record_equity()
 
@@ -219,7 +221,7 @@ class PaperEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None) -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None, exchange_name: str = "paper") -> None:
         """Update positions after a filled order."""
         if order.side == OrderSide.BUY:
             # Check for existing short position to close
@@ -231,7 +233,7 @@ class PaperEngine:
                 pos = Position(
                     id=uuid.uuid4(),
                     pair_symbol=order.pair_symbol,
-                    exchange_name="paper",
+                    exchange_name=exchange_name,
                     trading_mode=TradingMode.PAPER,
                     side=PositionSide.LONG,
                     status=PositionStatus.OPEN,
@@ -262,7 +264,7 @@ class PaperEngine:
                 pos = Position(
                     id=uuid.uuid4(),
                     pair_symbol=order.pair_symbol,
-                    exchange_name="paper",
+                    exchange_name=exchange_name,
                     trading_mode=TradingMode.PAPER,
                     side=PositionSide.SHORT,
                     status=PositionStatus.OPEN,
