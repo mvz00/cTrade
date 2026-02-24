@@ -84,6 +84,25 @@ async def ping_db(timeout: float = 10.0) -> bool:
         return False
 
 
+async def ensure_tables() -> None:
+    """Create any missing tables defined in the ORM models.
+
+    Uses ``CREATE TABLE IF NOT EXISTS`` semantics — safe to call on every
+    startup.  Existing tables and data are never modified.
+    """
+    if _engine is None:
+        logger.warning("ensure_tables called before init_db — skipping")
+        return
+    try:
+        from ctrade.db.models import Base
+
+        async with _engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified / created")
+    except Exception:
+        logger.exception("Failed to ensure tables — some tables may be missing")
+
+
 _DISPOSE_TIMEOUT_SECONDS = 5
 
 

@@ -74,7 +74,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         if db_ok:
             _db_available = True
-            print("[cTrade] [2/6] Database connected", flush=True)
+            # Ensure all ORM tables exist (CREATE TABLE IF NOT EXISTS)
+            from ctrade.db.engine import ensure_tables
+            await ensure_tables()
+            print("[cTrade] [2/6] Database connected + tables verified", flush=True)
         else:
             _db_available = False
             await close_db()

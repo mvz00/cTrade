@@ -180,9 +180,9 @@ class RuntimeConfigStore:
             }
 
             async def _do_save() -> None:
-                from ctrade.db.persistence import run_db_operation
+                from ctrade.db.persistence import run_simple_db_operation
 
-                async def _upsert(session: Any, _resolver: Any) -> None:
+                async def _upsert(session: Any) -> None:
                     from sqlalchemy.dialects.postgresql import insert as pg_insert
                     from ctrade.db.models import RuntimeConfigModel
 
@@ -197,12 +197,12 @@ class RuntimeConfigStore:
                         )
                         await session.execute(stmt)
 
-                await run_db_operation(_upsert, description="persist RuntimeConfig to DB")
+                await run_simple_db_operation(_upsert, description="persist RuntimeConfig to DB")
 
             fire_and_forget(_do_save())
 
         except Exception:
-            logger.debug("Failed to persist config to DB", exc_info=True)
+            logger.warning("Failed to persist config to DB", exc_info=True)
 
     def _save_to_disk(self) -> None:
         """Persist current state to JSON file.  Never raises — logs errors."""
@@ -366,13 +366,13 @@ class RuntimeConfigStore:
         precedence because the local file is lost on Railway redeploys
         but the DB survives.
         """
-        from ctrade.db.persistence import is_db_ready, run_db_operation
+        from ctrade.db.persistence import is_db_ready, run_simple_db_operation
 
         if not is_db_ready():
             logger.info("DB not available — RuntimeConfigStore using disk/defaults only")
             return
 
-        async def _load(session: Any, _resolver: Any) -> dict[str, Any]:
+        async def _load(session: Any) -> dict[str, Any]:
             from sqlalchemy import select
             from ctrade.db.models import RuntimeConfigModel
 
@@ -380,9 +380,9 @@ class RuntimeConfigStore:
             rows = (await session.execute(stmt)).scalars().all()
             return {r.key: r.value for r in rows}
 
-        loaded = await run_db_operation(_load, description="hydrate RuntimeConfigStore")
+        loaded = await run_simple_db_operation(_load, description="hydrate RuntimeConfigStore")
         if not loaded:
-            logger.debug("No runtime config found in DB — using disk/defaults")
+            logger.info("No runtime config found in DB — using disk/defaults")
             return
 
         with self._data_lock:

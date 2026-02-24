@@ -103,6 +103,44 @@ async def run_db_operation(
             pass
 
 
+async def run_simple_db_operation(
+    operation: Callable[..., Coroutine[Any, Any, T]],
+    *,
+    description: str = "db operation",
+) -> T | None:
+    """Like ``run_db_operation`` but without ``PairResolver`` overhead.
+
+    Calls ``operation(session)`` — useful for simple key-value operations
+    (e.g. runtime_config upserts) that don't need pair/exchange ID resolution.
+    """
+    session = await get_fresh_session()
+    if session is None:
+        return None
+    try:
+        result = await operation(session)
+        await session.commit()
+        return result
+    except OSError as e:
+        logger.warning("Simple DB op skipped (connection error): %s — %s", description, e)
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return None
+    except Exception:
+        logger.exception("Simple DB op failed: %s", description)
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            pass
+
+
 def fire_and_forget(coro: Coroutine[Any, Any, Any]) -> None:
     """Schedule *coro* on the running event loop without blocking the caller.
 
