@@ -11,7 +11,7 @@ import {
   usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair,
   usePositions, useClosePosition, useCloseAllPositions,
   usePortfolio, useEngineStatus, useStartEngine, useStopEngine,
-  useActivityLog,
+  useResetPaperEngine, useActivityLog,
 } from '@/api/hooks/useTrading';
 import { formatUSD, formatAUD, formatNumber, formatTime } from '@/lib/formatters';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,7 +19,7 @@ import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
   Play, Square, Plus, X, Zap, Activity, Search,
   TrendingUp, TrendingDown, DollarSign, ShieldAlert,
-  Download, ChevronDown, ChevronUp, History,
+  Download, ChevronDown, ChevronUp, History, RotateCcw,
 } from 'lucide-react';
 
 const USDT_TO_AUD = 1.55;
@@ -105,6 +105,7 @@ export function TradingPage() {
   const closeAllPos = useCloseAllPositions();
   const startEngine = useStartEngine();
   const stopEngine = useStopEngine();
+  const resetPaper = useResetPaperEngine();
   const updateTrading = useUpdateTradingMode();
   const updateRisk = useUpdateRisk();
   const { toast } = useToast();
@@ -325,6 +326,20 @@ export function TradingPage() {
               <Play size={14} /> Start Auto-Trading
             </Button>
           )}
+          <Button
+            variant="ghost"
+            disabled={isRunning || resetPaper.isPending}
+            onClick={() => {
+              if (window.confirm('Reset paper trading to $10,000? This clears all orders, positions, and history.')) {
+                resetPaper.mutate(undefined, {
+                  onSuccess: () => toast('Paper trading reset to $10,000', 'success'),
+                  onError: (err) => toast(err.message, 'error'),
+                });
+              }
+            }}
+          >
+            <RotateCcw size={14} /> Reset Balance
+          </Button>
           <span className="text-xs text-ct-text-dim">
             {isRunning
               ? `Analyzing ${(pairs || []).length} pairs every 30s`

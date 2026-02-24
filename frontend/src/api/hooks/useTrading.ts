@@ -125,6 +125,17 @@ export function useStopEngine() {
   });
 }
 
+export function useResetPaperEngine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.resetPaperEngine(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['trading'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
 export function useActivityLog() {
   return useQuery({
     queryKey: ['trading', 'activity'],
