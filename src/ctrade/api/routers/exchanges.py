@@ -121,8 +121,10 @@ async def toggle_exchange(exchange_id: str) -> ExchangeResponse:
     result = store.toggle_exchange(exchange_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Exchange not found")
-    # Active status change affects available pairs and portfolio
-    MarketDataProvider.get_instance().clear_pairs_cache()
+    # Active status change affects available pairs, prices, and portfolio
+    market = MarketDataProvider.get_instance()
+    market.clear_pairs_cache()
+    market.clear_ticker_cache()
     return ExchangeResponse(**result)
 
 

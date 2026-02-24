@@ -95,11 +95,14 @@ class MarketDataProvider:
     _instance: ClassVar[MarketDataProvider | None] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
+    _TICKER_CACHE_TTL = 300  # 5 minutes — shared across snapshot task & dashboard
+
     def __init__(self) -> None:
         self._sim_prices: dict[str, float] = dict(_SEED_PRICES)
         self._sim_rng = random.Random(42)
         self._data_lock = threading.Lock()
         self._cached_exchange_pairs: list[str] | None = None
+        self._ticker_cache: dict[str, tuple[Ticker, float]] = {}  # symbol → (ticker, epoch)
 
     @classmethod
     def get_instance(cls) -> MarketDataProvider:
@@ -199,6 +202,10 @@ class MarketDataProvider:
         """Clear the cached exchange pairs (e.g. after exchange config change)."""
         self._cached_exchange_pairs = None
 
+    def clear_ticker_cache(self) -> None:
+        """Clear the cached ticker prices (e.g. after exchange toggle)."""
+        self._ticker_cache.clear()
+
     async def get_ticker(self, symbol: str) -> Ticker:
         """Get current ticker for a symbol."""
         # Try ccxt first
@@ -283,7 +290,18 @@ class MarketDataProvider:
         Iterates every active exchange until one successfully returns
         a ticker for ``symbol``.  Returns ``None`` only if every
         exchange fails.
+
+        Results are cached for ``_TICKER_CACHE_TTL`` seconds to avoid
+        rate-limit failures when the dashboard and snapshot task both
+        call ``_price_balances()`` in quick succession.
         """
+        # ---- check cache first ----
+        cached = self._ticker_cache.get(symbol)
+        if cached is not None:
+            ticker, ts = cached
+            if time.time() - ts < self._TICKER_CACHE_TTL:
+                return ticker
+
         from ctrade.core.config_store import RuntimeConfigStore
         try:
             store = RuntimeConfigStore.get()
@@ -302,7 +320,7 @@ class MarketDataProvider:
                 continue
             try:
                 data = await exchange.fetch_ticker(symbol)
-                return Ticker(
+                result = Ticker(
                     pair_symbol=symbol,
                     last_price=Decimal(str(data.get("last", 0))),
                     bid=Decimal(str(data.get("bid", 0) or 0)),
@@ -313,6 +331,8 @@ class MarketDataProvider:
                     change_pct_24h=float(data.get("percentage", 0) or 0),
                     timestamp=datetime.now(timezone.utc),
                 )
+                self._ticker_cache[symbol] = (result, time.time())
+                return result
             except Exception:
                 pass  # try next exchange
             finally:
@@ -322,6 +342,7 @@ class MarketDataProvider:
         if symbol.endswith("/AUD"):
             ticker = await self._fetch_coinspot_price_native(symbol)
             if ticker:
+                self._ticker_cache[symbol] = (ticker, time.time())
                 return ticker
 
         logger.debug("ccxt ticker fetch failed for %s on all exchanges", symbol)
