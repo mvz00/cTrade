@@ -102,7 +102,7 @@ class MarketDataProvider:
         self._sim_rng = random.Random(42)
         self._data_lock = threading.Lock()
         self._cached_exchange_pairs: list[str] | None = None
-        self._ticker_cache: dict[str, tuple[Ticker, float]] = {}  # symbol → (ticker, epoch)
+        self._ticker_cache: dict[str, tuple[Ticker, float]] = {}  # key → (ticker, epoch); "symbol" or "symbol:exchange_id"
 
     @classmethod
     def get_instance(cls) -> MarketDataProvider:
@@ -284,68 +284,97 @@ class MarketDataProvider:
             logger.warning("Failed to create ccxt exchange (id=%s): %s", exchange_id, e)
             return None
 
-    async def _try_ccxt_ticker(self, symbol: str) -> Ticker | None:
-        """Try to fetch ticker from ALL configured exchanges.
+    async def _try_ccxt_ticker(
+        self, symbol: str, exchange_id: str | None = None,
+    ) -> Ticker | None:
+        """Try to fetch a ticker for *symbol*.
 
-        Iterates every active exchange until one successfully returns
-        a ticker for ``symbol``.  Returns ``None`` only if every
-        exchange fails.
+        When ``exchange_id`` is provided, fetches ONLY from that specific
+        exchange (exchange-scoped pricing for portfolio valuation).
+        When ``None``, iterates all active exchanges until one succeeds
+        (best-effort pricing for trading operations).
 
-        Results are cached for ``_TICKER_CACHE_TTL`` seconds to avoid
-        rate-limit failures when the dashboard and snapshot task both
-        call ``_price_balances()`` in quick succession.
+        Results are cached for ``_TICKER_CACHE_TTL`` seconds.  Cache keys
+        are scoped by ``exchange_id`` to prevent cross-exchange price bleed.
         """
+        cache_key = f"{symbol}:{exchange_id}" if exchange_id else symbol
+
         # ---- check cache first ----
-        cached = self._ticker_cache.get(symbol)
+        cached = self._ticker_cache.get(cache_key)
         if cached is not None:
             ticker, ts = cached
             if time.time() - ts < self._TICKER_CACHE_TTL:
                 return ticker
 
         from ctrade.core.config_store import RuntimeConfigStore
+        store: RuntimeConfigStore | None = None
         try:
             store = RuntimeConfigStore.get()
-            exchanges_list = store.list_exchanges()
         except RuntimeError:
             return None
 
-        if not exchanges_list:
-            return None
+        def _make_ticker(data: dict) -> Ticker:
+            return Ticker(
+                pair_symbol=symbol,
+                last_price=Decimal(str(data.get("last", 0))),
+                bid=Decimal(str(data.get("bid", 0) or 0)),
+                ask=Decimal(str(data.get("ask", 0) or 0)),
+                high_24h=Decimal(str(data.get("high", 0) or 0)),
+                low_24h=Decimal(str(data.get("low", 0) or 0)),
+                volume_24h=Decimal(str(data.get("baseVolume", 0) or 0)),
+                change_pct_24h=float(data.get("percentage", 0) or 0),
+                timestamp=datetime.now(timezone.utc),
+            )
 
-        for ex_info in exchanges_list:
-            if not ex_info.get("is_active", True):
-                continue
-            exchange = await self._create_ccxt_exchange(ex_info["id"])
-            if not exchange:
-                continue
-            try:
-                data = await exchange.fetch_ticker(symbol)
-                result = Ticker(
-                    pair_symbol=symbol,
-                    last_price=Decimal(str(data.get("last", 0))),
-                    bid=Decimal(str(data.get("bid", 0) or 0)),
-                    ask=Decimal(str(data.get("ask", 0) or 0)),
-                    high_24h=Decimal(str(data.get("high", 0) or 0)),
-                    low_24h=Decimal(str(data.get("low", 0) or 0)),
-                    volume_24h=Decimal(str(data.get("baseVolume", 0) or 0)),
-                    change_pct_24h=float(data.get("percentage", 0) or 0),
-                    timestamp=datetime.now(timezone.utc),
-                )
-                self._ticker_cache[symbol] = (result, time.time())
-                return result
-            except Exception:
-                pass  # try next exchange
-            finally:
-                await exchange.close()
+        if exchange_id:
+            # ----- Exchange-scoped: only try the specified exchange -----
+            exchange = await self._create_ccxt_exchange(exchange_id)
+            if exchange:
+                try:
+                    data = await exchange.fetch_ticker(symbol)
+                    result = _make_ticker(data)
+                    self._ticker_cache[cache_key] = (result, time.time())
+                    return result
+                except Exception:
+                    pass  # fall through to AUD fallback
+                finally:
+                    await exchange.close()
+        else:
+            # ----- Unscoped: iterate ALL active exchanges -----
+            exchanges_list = store.list_exchanges()
+            if not exchanges_list:
+                return None
+
+            for ex_info in exchanges_list:
+                if not ex_info.get("is_active", True):
+                    continue
+                exchange = await self._create_ccxt_exchange(ex_info["id"])
+                if not exchange:
+                    continue
+                try:
+                    data = await exchange.fetch_ticker(symbol)
+                    result = _make_ticker(data)
+                    self._ticker_cache[cache_key] = (result, time.time())
+                    return result
+                except Exception:
+                    pass  # try next exchange
+                finally:
+                    await exchange.close()
 
         # Fallback: try CoinSpot public prices API for AUD pairs
         if symbol.endswith("/AUD"):
-            ticker = await self._fetch_coinspot_price_native(symbol)
-            if ticker:
-                self._ticker_cache[symbol] = (ticker, time.time())
-                return ticker
+            # When exchange-scoped, only use native API if this IS CoinSpot
+            should_try_native = True
+            if exchange_id:
+                entry = store.get_exchange_entry(exchange_id)
+                should_try_native = entry is not None and entry.name.lower() == "coinspot"
+            if should_try_native:
+                ticker = await self._fetch_coinspot_price_native(symbol)
+                if ticker:
+                    self._ticker_cache[cache_key] = (ticker, time.time())
+                    return ticker
 
-        logger.debug("ccxt ticker fetch failed for %s on all exchanges", symbol)
+        logger.debug("ccxt ticker fetch failed for %s (exchange_id=%s)", symbol, exchange_id)
         return None
 
     @staticmethod
@@ -590,12 +619,17 @@ class MarketDataProvider:
 
         return merged if any_success else None
 
-    async def _price_balances(self, balances: dict[str, float]) -> dict[str, Any]:
+    async def _price_balances(
+        self, balances: dict[str, float], exchange_id: str | None = None,
+    ) -> dict[str, Any]:
         """Price a set of currency balances and return a portfolio summary.
 
         Uses a two-pass strategy:
         - Pass 1 (instant): seed-price estimates for all holdings
         - Pass 2 (capped): live ticker lookups for top 10 holdings
+
+        When ``exchange_id`` is provided, ticker lookups are scoped to
+        that exchange only (see ``_try_ccxt_ticker``).
 
         Returns a dict compatible with the ``PortfolioResponse`` schema.
         """
@@ -634,11 +668,11 @@ class MarketDataProvider:
             usd_value = est_usd
             if i < _MAX_LIVE_LOOKUPS:
                 try:
-                    ticker = await self._try_ccxt_ticker(f"{currency}/USDT")
+                    ticker = await self._try_ccxt_ticker(f"{currency}/USDT", exchange_id)
                     if ticker is None:
-                        ticker = await self._try_ccxt_ticker(f"{currency}/USD")
+                        ticker = await self._try_ccxt_ticker(f"{currency}/USD", exchange_id)
                     if ticker is None:
-                        ticker = await self._try_ccxt_ticker(f"{currency}/AUD")
+                        ticker = await self._try_ccxt_ticker(f"{currency}/AUD", exchange_id)
                     if ticker is not None:
                         price = float(ticker.last_price)
                         if ticker.pair_symbol.endswith("/AUD"):
@@ -790,7 +824,7 @@ class MarketDataProvider:
                         logger.warning("CoinSpot native fallback failed: %s", e)
 
             if balances:
-                portfolio = await self._price_balances(balances)
+                portfolio = await self._price_balances(balances, exchange_id=str(ex_info["id"]))
                 results[ex_name] = portfolio
                 logger.info(
                     "Per-exchange portfolio for %s: $%.2f",
