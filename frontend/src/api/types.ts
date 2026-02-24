@@ -78,6 +78,7 @@ export interface StrategyConfig {
   social_velocity_weight: number;
   strategy_mode: string;
   short_min_1h_change_pct: number;
+  risk_appetite: number;
   entry_confidence_threshold: number;
   exit_confidence_threshold: number;
 }
@@ -276,6 +277,7 @@ export interface StrategyConfigUpdate {
   social_velocity_weight?: number;
   strategy_mode?: string;
   short_min_1h_change_pct?: number;
+  risk_appetite?: number;
   entry_confidence_threshold?: number;
   exit_confidence_threshold?: number;
 }

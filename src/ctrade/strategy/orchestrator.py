@@ -370,8 +370,13 @@ class TradingOrchestrator:
             trading = {}
             self._active_exchange_id = None
 
-        entry_threshold = strategy.get("entry_confidence_threshold", 0.55)
-        exit_threshold = strategy.get("exit_confidence_threshold", 0.45)
+        # ---- Risk appetite → dynamic thresholds + amplification ----
+        risk_appetite = strategy.get("risk_appetite", 5)
+        half_zone = 0.10 - (risk_appetite - 1) * 0.01  # 0.10 → 0.01
+        entry_threshold = 0.50 + half_zone              # 0.60 → 0.51
+        exit_threshold = 0.50 - half_zone               # 0.40 → 0.49
+        amplification = 1.0 + (risk_appetite - 1) * 0.167  # 1.0 → 2.5
+
         max_position_pct = risk.get("max_position_pct", 0.10)
         max_open = trading.get("max_open_positions", 5)
         max_order_usdt = trading.get("max_order_usdt", 100.0)
@@ -394,6 +399,7 @@ class TradingOrchestrator:
                     stop_loss_pct, take_profit_pct,
                     strategy,
                     strategy_mode, short_min_1h_change_pct,
+                    amplification=amplification,
                 )
             except Exception:
                 logger.exception("Error processing pair %s", pair)
@@ -459,6 +465,7 @@ class TradingOrchestrator:
         strategy: dict[str, Any],
         strategy_mode: str = "long_only",
         short_min_1h_change_pct: float = 2.0,
+        amplification: float = 1.0,
     ) -> None:
         """Analyze a single pair using 7-way signal fusion and potentially trade.
 
@@ -560,7 +567,9 @@ class TradingOrchestrator:
         else:
             weights = {"technical": 1.0}
 
-        composite = sum(scores[k] * weights[k] for k in scores)
+        raw_composite = sum(scores[k] * weights[k] for k in scores)
+        # Amplify signal strength based on risk appetite (stretch away from 0.5)
+        composite = 0.5 + (raw_composite - 0.5) * amplification
         composite = round(max(0.0, min(1.0, composite)), 4)
 
         # ---- Multi-source agreement bonus ----
@@ -634,6 +643,8 @@ class TradingOrchestrator:
 
         contributing_factors["fusion"] = {
             "composite": composite,
+            "raw_composite": round(raw_composite, 4),
+            "amplification": round(amplification, 3),
             "weights": {k: round(v, 4) for k, v in weights.items()},
             "scores": {k: round(v, 4) for k, v in scores.items()},
             "agreement": agreement,
