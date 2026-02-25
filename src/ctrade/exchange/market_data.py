@@ -374,6 +374,12 @@ class MarketDataProvider:
             # endpoints accept any valid coin/market pair.  Injecting
             # synthetic market entries lets ccxt resolve symbols like
             # ADA/BTC even when load_markets() didn't return them.
+            # Track which symbols are synthetic (injected by us, not returned
+            # by load_markets).  Live orders must be rejected for these pairs
+            # because the exchange API doesn't truly support them — tickers
+            # return wrong-currency prices and orders hit the wrong endpoint.
+            synthetic_symbols: set[str] = set()
+
             if entry and hasattr(instance, 'markets') and instance.markets:
                 existing_quotes = {m.get("quote") for m in instance.markets.values()}
                 missing_quotes = set(entry.quote_currencies) - existing_quotes
@@ -408,6 +414,7 @@ class MarketDataProvider:
                                     },
                                     "info": {},
                                 }
+                                synthetic_symbols.add(sym)
                                 injected += 1
                     if injected:
                         logger.info(
@@ -418,6 +425,9 @@ class MarketDataProvider:
                             entry.name,
                             ", ".join(sorted(existing_quotes)),
                         )
+
+            # Expose synthetic symbols so live_engine can block orders for them.
+            instance._ctrade_synthetic_symbols = synthetic_symbols  # type: ignore[attr-defined]
 
             # Some exchanges (e.g. CoinSpot) don't implement parse_order()
             # in their ccxt module, causing create_order() to throw

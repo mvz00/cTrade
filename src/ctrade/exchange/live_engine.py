@@ -114,6 +114,19 @@ class LiveEngine:
             pass
         return "unknown"
 
+    def _resolve_exchange_id(self, exchange_name: str) -> str | None:
+        """Look up an exchange_id from the exchange name."""
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+
+            store = RuntimeConfigStore.get()
+            for ex_dict in store.list_exchanges():
+                if ex_dict["name"].lower() == exchange_name.lower():
+                    return ex_dict["id"]
+        except Exception:
+            pass
+        return None
+
     # ---- Order management ----
 
     async def place_order(
@@ -194,6 +207,25 @@ class LiveEngine:
                 order.error_message = "No exchange configured or connection failed"
                 with self._data_lock:
                     self._orders.append(order)
+                return order
+
+            # Reject orders for synthetic (injected) markets — these pairs
+            # only work in paper trading mode.  The exchange's actual API
+            # doesn't support them and the ticker prices are wrong.
+            synthetic = getattr(ccxt_exchange, '_ctrade_synthetic_symbols', set())
+            if symbol in synthetic:
+                order.status = OrderStatus.REJECTED
+                order.error_message = (
+                    f"{symbol} is not available for live trading on {exchange_name}. "
+                    f"This pair only works in paper trading mode."
+                )
+                with self._data_lock:
+                    self._orders.append(order)
+                logger.warning(
+                    "Symbol %s is synthetic on %s — order rejected",
+                    symbol, exchange_name,
+                )
+                await ccxt_exchange.close()
                 return order
 
             # Auto-convert market → limit for exchanges that don't support market orders
@@ -440,11 +472,15 @@ class LiveEngine:
                 return None
 
         side = "sell" if pos.side == PositionSide.LONG else "buy"
+        # Route close order to the same exchange that opened the position
+        close_exchange_id = self._resolve_exchange_id(pos.exchange_name)
         order = await self.place_order(
             symbol=pos.pair_symbol,
             side=side,
             order_type="market",
             quantity=float(pos.quantity),
+            exchange_name=pos.exchange_name,
+            exchange_id=close_exchange_id,
         )
 
         # If place_order didn't close the position via _update_positions
