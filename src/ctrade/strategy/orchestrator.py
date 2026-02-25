@@ -388,6 +388,7 @@ class TradingOrchestrator:
 
         strategy_mode = strategy.get("strategy_mode", "long_only")
         short_min_1h_change_pct = strategy.get("short_min_1h_change_pct", 2.0)
+        min_hold_minutes = strategy.get("min_hold_minutes", 15)
 
         for pair in ranked_pairs:
             try:
@@ -400,6 +401,7 @@ class TradingOrchestrator:
                     strategy,
                     strategy_mode, short_min_1h_change_pct,
                     amplification=amplification,
+                    min_hold_minutes=min_hold_minutes,
                 )
             except Exception:
                 logger.exception("Error processing pair %s", pair)
@@ -466,6 +468,7 @@ class TradingOrchestrator:
         strategy_mode: str = "long_only",
         short_min_1h_change_pct: float = 2.0,
         amplification: float = 1.0,
+        min_hold_minutes: int = 15,
     ) -> None:
         """Analyze a single pair using 7-way signal fusion and potentially trade.
 
@@ -744,7 +747,7 @@ class TradingOrchestrator:
                 portfolio, open_positions, max_open, max_order_usdt,
                 max_position_pct, composite, agreement,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
-                outlook=outlook,
+                outlook=outlook, min_hold_minutes=min_hold_minutes,
             )
         elif strategy_mode == "short_only":
             await self._execute_short_only(
@@ -753,7 +756,7 @@ class TradingOrchestrator:
                 max_position_pct, composite, agreement,
                 short_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
-                outlook=outlook,
+                outlook=outlook, min_hold_minutes=min_hold_minutes,
             )
         elif strategy_mode == "both":
             await self._execute_both(
@@ -762,7 +765,7 @@ class TradingOrchestrator:
                 max_position_pct, composite, agreement,
                 short_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
-                outlook=outlook,
+                outlook=outlook, min_hold_minutes=min_hold_minutes,
             )
 
     # ------------------------------------------------------------------
@@ -889,6 +892,22 @@ class TradingOrchestrator:
                 "price": price, "status": order_status,
             })
 
+    def _is_within_cooldown(
+        self, positions: list[dict], pair: str, side: str, min_hold_minutes: int,
+    ) -> bool:
+        """Return True if any open position for pair+side is younger than min_hold_minutes."""
+        if min_hold_minutes <= 0:
+            return False
+        now = datetime.now(timezone.utc)
+        for pos in positions:
+            if pos["pair_symbol"] == pair and pos["side"] == side:
+                opened_str = pos.get("opened_at")
+                if opened_str:
+                    opened_at = datetime.fromisoformat(opened_str)
+                    if (now - opened_at).total_seconds() / 60 < min_hold_minutes:
+                        return True
+        return False
+
     async def _close_positions(
         self,
         pair: str,
@@ -941,6 +960,7 @@ class TradingOrchestrator:
         composite: float, agreement: str,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
+        min_hold_minutes: int = 15,
     ) -> None:
         """Long-only mode: BUY opens long, SELL closes long."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -958,6 +978,16 @@ class TradingOrchestrator:
             )
 
         elif signal.action == SignalAction.SELL:
+            positions = engine.get_positions(status="open")
+            if self._is_within_cooldown(positions, pair, "long", min_hold_minutes):
+                logger.info("HOLD (cooldown) %s: SELL suppressed — position < %d min old", pair, min_hold_minutes)
+                self._log_activity(
+                    "signal", pair,
+                    f"HOLD (cooldown) {pair}: SELL suppressed — position < {min_hold_minutes}min old",
+                    {"action": "SELL_SUPPRESSED", "composite": composite,
+                     "agreement": agreement, "min_hold_minutes": min_hold_minutes},
+                )
+                return
             await self._close_positions(pair, "long", engine, composite, agreement)
 
     async def _execute_short_only(
@@ -967,6 +997,7 @@ class TradingOrchestrator:
         composite: float, agreement: str, short_min_1h_change_pct: float,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
+        min_hold_minutes: int = 15,
     ) -> None:
         """Short-only mode: SELL opens short (momentum filter), BUY closes short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -995,6 +1026,16 @@ class TradingOrchestrator:
             )
 
         elif signal.action == SignalAction.BUY:
+            positions = engine.get_positions(status="open")
+            if self._is_within_cooldown(positions, pair, "short", min_hold_minutes):
+                logger.info("HOLD (cooldown) %s: close-short suppressed — position < %d min old", pair, min_hold_minutes)
+                self._log_activity(
+                    "signal", pair,
+                    f"HOLD (cooldown) {pair}: close-short suppressed — position < {min_hold_minutes}min old",
+                    {"action": "CLOSE_SHORT_SUPPRESSED", "composite": composite,
+                     "agreement": agreement, "min_hold_minutes": min_hold_minutes},
+                )
+                return
             await self._close_positions(pair, "short", engine, composite, agreement)
 
     async def _execute_both(
@@ -1004,13 +1045,24 @@ class TradingOrchestrator:
         composite: float, agreement: str, short_min_1h_change_pct: float,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
+        min_hold_minutes: int = 15,
     ) -> None:
         """Both mode: BUY closes short + opens long, SELL closes long + opens short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
 
         if signal.action == SignalAction.BUY:
-            # Close any short first
-            await self._close_positions(pair, "short", engine, composite, agreement)
+            # Close any short first (with cooldown check)
+            positions = engine.get_positions(status="open")
+            if self._is_within_cooldown(positions, pair, "short", min_hold_minutes):
+                logger.info("HOLD (cooldown) %s: close-short suppressed — position < %d min old", pair, min_hold_minutes)
+                self._log_activity(
+                    "signal", pair,
+                    f"HOLD (cooldown) {pair}: close-short suppressed — position < {min_hold_minutes}min old",
+                    {"action": "CLOSE_SHORT_SUPPRESSED", "composite": composite,
+                     "agreement": agreement, "min_hold_minutes": min_hold_minutes},
+                )
+            else:
+                await self._close_positions(pair, "short", engine, composite, agreement)
 
             # Re-check open count after closing
             portfolio = await engine.get_portfolio()
@@ -1028,7 +1080,17 @@ class TradingOrchestrator:
             )
 
         elif signal.action == SignalAction.SELL:
-            # Close any long first
+            # Close any long first (with cooldown check)
+            positions = engine.get_positions(status="open")
+            if self._is_within_cooldown(positions, pair, "long", min_hold_minutes):
+                logger.info("HOLD (cooldown) %s: close-long suppressed — position < %d min old", pair, min_hold_minutes)
+                self._log_activity(
+                    "signal", pair,
+                    f"HOLD (cooldown) {pair}: close-long suppressed — position < {min_hold_minutes}min old",
+                    {"action": "SELL_SUPPRESSED", "composite": composite,
+                     "agreement": agreement, "min_hold_minutes": min_hold_minutes},
+                )
+                return
             await self._close_positions(pair, "long", engine, composite, agreement)
 
             # Momentum filter for short entry

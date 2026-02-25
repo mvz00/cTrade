@@ -123,7 +123,7 @@ export function DashboardPage() {
             </div>
           </div>
           {hasPortfolioHistory ? (
-            <EquityCurveChart series={portfolioHistory!} />
+            <EquityCurveChart series={portfolioHistory!} tradingMode={summary?.trading_mode} />
           ) : (
             <EquityCurveChart data={equityCurve ?? []} />
           )}

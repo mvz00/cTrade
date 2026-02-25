@@ -26,6 +26,7 @@ interface LegacyChartProps {
 interface MultiSeriesChartProps {
   data?: never;
   series: PortfolioHistorySeries[];
+  tradingMode?: string;
 }
 
 type EquityCurveChartProps = LegacyChartProps | MultiSeriesChartProps;
@@ -37,7 +38,25 @@ export function EquityCurveChart(props: EquityCurveChartProps) {
 
   const isMultiSeries = 'series' in props && props.series !== undefined;
   const legacyData = !isMultiSeries ? (props as LegacyChartProps).data : undefined;
-  const multiSeries = isMultiSeries ? (props as MultiSeriesChartProps).series : undefined;
+  const rawMultiSeries = isMultiSeries ? (props as MultiSeriesChartProps).series : undefined;
+  const tradingMode = isMultiSeries ? (props as MultiSeriesChartProps).tradingMode : undefined;
+
+  // Filter series based on trading mode:
+  // Paper mode → only paper/unknown lines; Live mode → only real exchange lines
+  const multiSeries = rawMultiSeries?.filter((s) => {
+    const name = s.exchange_name.toLowerCase();
+    if (tradingMode === 'paper') {
+      return name === 'unknown' || name === 'paper';
+    }
+    if (tradingMode === 'live') {
+      return name !== 'unknown' && name !== 'paper';
+    }
+    return true; // no mode info → show all
+  });
+
+  /** Display-friendly name: rename "unknown" → "Paper Trade" */
+  const displayName = (name: string) =>
+    name.toLowerCase() === 'unknown' ? 'Paper Trade' : name;
 
   // Determine if we have data to show
   const hasData = isMultiSeries
@@ -47,7 +66,7 @@ export function EquityCurveChart(props: EquityCurveChartProps) {
   // Build legend entries for multi-series
   const legendEntries = multiSeries
     ? multiSeries.map((s, i) => ({
-        name: s.exchange_name,
+        name: displayName(s.exchange_name),
         color: EXCHANGE_COLORS[i % EXCHANGE_COLORS.length],
       }))
     : [];
@@ -96,7 +115,7 @@ export function EquityCurveChart(props: EquityCurveChartProps) {
           color,
           lineWidth: 2,
           priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
-          title: s.exchange_name,
+          title: displayName(s.exchange_name),
         });
 
         const chartData = s.points
@@ -175,7 +194,7 @@ export function EquityCurveChart(props: EquityCurveChartProps) {
       seriesRefs.current = [];
     };
     // Re-create chart when data changes
-  }, [hasData, isMultiSeries, multiSeries, legacyData]);
+  }, [hasData, isMultiSeries, multiSeries, legacyData, tradingMode]);
 
   if (!hasData) {
     return (
