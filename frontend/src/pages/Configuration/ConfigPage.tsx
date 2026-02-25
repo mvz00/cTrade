@@ -15,10 +15,10 @@ export function ConfigPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TradingModeCard />
+        <EmailNotificationCard />
         <StrategyForm />
         <RiskForm />
         <ExchangeSection />
-        <EmailNotificationCard />
       </div>
     </div>
   );

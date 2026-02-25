@@ -25,6 +25,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/exchanges", tags=["exchanges"])
 
+
+async def _store() -> RuntimeConfigStore:
+    """Get the config store, ensuring it's initialized and hydrated from DB."""
+    if not RuntimeConfigStore.is_initialized():
+        try:
+            from ctrade.settings import get_settings
+
+            RuntimeConfigStore.initialize(get_settings())
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail="Configuration store not available. Server is still starting up.",
+            )
+    store = RuntimeConfigStore.get()
+    await store.ensure_hydrated()
+    return store
+
+
 # In Docker (non-editable install), __file__ is in site-packages so the
 # parents[4] trick won't reach /app.  Use CTRADE_CONFIG_DIR when set
 # (Dockerfile sets it to /app/config).
@@ -77,7 +95,7 @@ async def list_available_exchanges() -> list[AvailableExchangeResponse]:
 @router.get("/", response_model=list[ExchangeResponse])
 async def list_exchanges() -> list[ExchangeResponse]:
     """List configured exchanges (credentials are never returned)."""
-    store = RuntimeConfigStore.get()
+    store = await _store()
     return [ExchangeResponse(**ex) for ex in store.list_exchanges()]
 
 
@@ -97,7 +115,7 @@ async def add_exchange(
         )
 
     template = available[body.name.lower()]
-    store = RuntimeConfigStore.get()
+    store = await _store()
     result = store.add_exchange(
         name=body.name.lower(),
         exchange_type=template.get("exchange_type", "spot"),
@@ -117,7 +135,7 @@ async def add_exchange(
 @router.patch("/{exchange_id}/toggle", response_model=ExchangeResponse)
 async def toggle_exchange(exchange_id: str) -> ExchangeResponse:
     """Toggle an exchange between active and inactive."""
-    store = RuntimeConfigStore.get()
+    store = await _store()
     result = store.toggle_exchange(exchange_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Exchange not found")
@@ -131,7 +149,7 @@ async def toggle_exchange(exchange_id: str) -> ExchangeResponse:
 @router.delete("/{exchange_id}", status_code=204)
 async def delete_exchange(exchange_id: str) -> None:
     """Remove an exchange configuration."""
-    store = RuntimeConfigStore.get()
+    store = await _store()
     if not store.remove_exchange(exchange_id):
         raise HTTPException(status_code=404, detail="Exchange not found")
     # Exchange removed → refresh available pairs
@@ -160,7 +178,7 @@ async def update_exchange(
         )
 
     vault = _get_vault(settings)
-    store = RuntimeConfigStore.get()
+    store = await _store()
     result = store.update_exchange(
         exchange_id,
         vault,
@@ -185,7 +203,7 @@ async def test_exchange(
     settings: AppSettings = Depends(get_app_settings),
 ) -> ExchangeTestResponse:
     """Test exchange connectivity by fetching markets via ccxt."""
-    store = RuntimeConfigStore.get()
+    store = await _store()
     entry = store.get_exchange_entry(exchange_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Exchange not found")

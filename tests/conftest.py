@@ -36,8 +36,12 @@ def _disable_auth_for_tests(monkeypatch):
     via monkeypatch and clear the settings cache.
     """
     from ctrade.settings import get_settings
+    from ctrade.security.vault import Vault
+
     get_settings.cache_clear()
     monkeypatch.setenv("CTRADE_AUTH__ENABLED", "false")
+    # Provide a test encryption key so live-mode validation passes
+    monkeypatch.setenv("CTRADE_ENCRYPTION_KEY", Vault.generate_key())
     yield
     get_settings.cache_clear()
 
