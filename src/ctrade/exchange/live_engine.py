@@ -196,6 +196,31 @@ class LiveEngine:
                     self._orders.append(order)
                 return order
 
+            # Auto-convert market → limit for exchanges that don't support market orders
+            if order_type == "market":
+                supports_market = ccxt_exchange.has.get("createMarketOrder", True)
+                if not supports_market:
+                    order_type = "limit"
+                    order.order_type = OrderType.LIMIT
+                    # current_price was already fetched above for size validation
+                    if price is None and current_price > 0:
+                        slippage = 1.005 if side == "buy" else 0.995
+                        price = round(current_price * slippage, 8)
+                        order.price = Decimal(str(price))
+                    elif price is None:
+                        # Fallback: re-fetch ticker
+                        _fb_ticker = await market._try_ccxt_ticker(symbol)
+                        if _fb_ticker:
+                            _cp = float(_fb_ticker.last_price)
+                            slippage = 1.005 if side == "buy" else 0.995
+                            price = round(_cp * slippage, 8)
+                            order.price = Decimal(str(price))
+                    logger.info(
+                        "Exchange does not support market orders — converted to limit @ %.8f for %s",
+                        price or 0,
+                        symbol,
+                    )
+
             if order_type == "market":
                 if side == "buy":
                     result = await ccxt_exchange.create_market_buy_order(symbol, quantity)
