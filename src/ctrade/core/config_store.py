@@ -664,6 +664,17 @@ class RuntimeConfigStore:
                     return ex
             return None
 
+    def find_exchange_for_pair(self, pair: str) -> ExchangeEntry | None:
+        """Find the first active exchange whose quote_currencies includes this pair's quote."""
+        quote = pair.split("/")[1] if "/" in pair else None
+        if not quote:
+            return None
+        with self._data_lock:
+            for ex in self._exchanges:
+                if ex.is_active and quote in ex.quote_currencies:
+                    return ex
+        return None
+
     def toggle_exchange(self, exchange_id: str) -> dict[str, Any] | None:
         """Toggle ``is_active`` for an exchange.
 

@@ -167,6 +167,7 @@ class PaperEngine:
         stop_loss: float | None = None,
         take_profit: float | None = None,
         exchange_name: str = "paper",
+        exchange_id: str | None = None,
     ) -> Order:
         """Place an order. Market orders fill immediately."""
         from ctrade.exchange.market_data import MarketDataProvider

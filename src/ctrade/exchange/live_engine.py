@@ -97,12 +97,16 @@ class LiveEngine:
 
     # ---- Helper: get exchange config ----
 
-    def _get_exchange_name(self) -> str:
-        """Get the name of the first configured exchange."""
+    def _get_exchange_name(self, exchange_id: str | None = None) -> str:
+        """Get the name of a specific exchange, or fall back to the first configured."""
         try:
             from ctrade.core.config_store import RuntimeConfigStore
 
             store = RuntimeConfigStore.get()
+            if exchange_id:
+                entry = store.get_exchange_entry(exchange_id)
+                if entry:
+                    return entry.name
             exchanges = store.list_exchanges()
             if exchanges:
                 return exchanges[0]["name"]
@@ -125,12 +129,14 @@ class LiveEngine:
         stop_loss: float | None = None,
         take_profit: float | None = None,
         exchange_name: str = "",
+        exchange_id: str | None = None,
     ) -> Order:
         """Place a real order on the exchange via ccxt."""
         from ctrade.core.config_store import RuntimeConfigStore
         from ctrade.exchange.market_data import MarketDataProvider
 
-        exchange_name = self._get_exchange_name()
+        if not exchange_name:
+            exchange_name = self._get_exchange_name(exchange_id)
 
         order = Order(
             id=uuid.uuid4(),
@@ -181,7 +187,7 @@ class LiveEngine:
         ccxt_exchange = None
         try:
             market = MarketDataProvider.get_instance()
-            ccxt_exchange = await market._create_ccxt_exchange()
+            ccxt_exchange = await market._create_ccxt_exchange(exchange_id)
 
             if ccxt_exchange is None:
                 order.status = OrderStatus.REJECTED
