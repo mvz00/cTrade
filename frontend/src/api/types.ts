@@ -57,6 +57,8 @@ export interface TradingModeResponse {
   mode: 'paper' | 'live';
   max_order_usdt?: number;
   max_open_positions?: number;
+  default_quote_currency?: string;
+  order_timeout_seconds?: number;
 }
 
 export interface ActivityEntry {
@@ -270,6 +272,8 @@ export interface TradingModeUpdate {
   mode?: 'paper' | 'live';
   max_order_usdt?: number;
   max_open_positions?: number;
+  default_quote_currency?: string;
+  order_timeout_seconds?: number;
 }
 
 export interface StrategyConfigUpdate {

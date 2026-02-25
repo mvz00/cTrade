@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/cn';
 
 interface NumberInputProps {
@@ -23,7 +24,30 @@ export function NumberInput({
   error,
   className,
 }: NumberInputProps) {
+  const [displayValue, setDisplayValue] = useState(String(value));
+
+  // Sync from external prop changes (e.g. API response resets the form)
+  useEffect(() => {
+    setDisplayValue(String(value));
+  }, [value]);
+
   const inputId = label.toLowerCase().replace(/\s+/g, '-');
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setDisplayValue(e.target.value);
+  }
+
+  function handleBlur() {
+    const parsed = parseFloat(displayValue);
+    if (isNaN(parsed)) {
+      const fallback = min ?? 0;
+      setDisplayValue(String(fallback));
+      onChange(fallback);
+    } else {
+      onChange(parsed);
+    }
+  }
+
   return (
     <div className={cn('space-y-1.5', className)}>
       <label htmlFor={inputId} className="block text-sm font-medium text-ct-text-muted">
@@ -33,8 +57,9 @@ export function NumberInput({
         <input
           id={inputId}
           type="number"
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          value={displayValue}
+          onChange={handleChange}
+          onBlur={handleBlur}
           min={min}
           max={max}
           step={step}
