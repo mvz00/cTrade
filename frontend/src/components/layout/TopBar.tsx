@@ -4,6 +4,7 @@ import { useTradingMode, useUpdateTradingMode } from '@/api/hooks/useConfig';
 import { Badge } from '@/components/ui/Badge';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { UserDropdown } from './UserDropdown';
 
@@ -13,16 +14,24 @@ export function TopBar() {
   const updateMode = useUpdateTradingMode();
   const { setMobileOpen } = useSidebar();
   const { toast } = useToast();
+  const { confirm, dialogProps } = useConfirm();
 
   const isOnline = health.data?.status === 'ok';
   const mode = tradingMode.data?.mode ?? 'paper';
 
-  function handleToggleMode() {
+  async function handleToggleMode() {
     const newMode = mode === 'paper' ? 'live' : 'paper';
-    const msg = newMode === 'live'
-      ? 'Switch to LIVE trading? Real money will be used.'
-      : 'Switch to Paper trading?';
-    if (!window.confirm(msg)) return;
+    const title = newMode === 'live' ? 'Switch to Live Trading' : 'Switch to Paper Trading';
+    const message = newMode === 'live'
+      ? 'You are about to switch to LIVE trading. Real money will be used for all trades.'
+      : 'Switch back to Paper trading mode? No real money will be used.';
+    const ok = await confirm({
+      title,
+      message,
+      confirmLabel: newMode === 'live' ? 'Go Live' : 'Switch',
+      variant: newMode === 'live' ? 'danger' : 'primary',
+    });
+    if (!ok) return;
     updateMode.mutate(
       { mode: newMode },
       {
@@ -33,35 +42,39 @@ export function TopBar() {
   }
 
   return (
-    <header className="h-14 bg-ct-bg-card border-b border-ct-border flex items-center justify-between px-4 md:px-6">
-      {/* Hamburger menu — mobile only */}
-      <button
-        className="md:hidden p-2 -ml-1 rounded-lg text-ct-text-muted hover:text-ct-text hover:bg-ct-bg-hover transition-colors"
-        onClick={() => setMobileOpen(true)}
-        aria-label="Open menu"
-      >
-        <Menu size={20} />
-      </button>
-      {/* Desktop spacer */}
-      <div className="hidden md:block" />
-
-      <div className="flex items-center gap-3 md:gap-4">
+    <>
+      <header className="h-14 bg-ct-bg-card border-b border-ct-border flex items-center justify-between px-4 md:px-6">
+        {/* Hamburger menu — mobile only */}
         <button
-          onClick={handleToggleMode}
-          disabled={updateMode.isPending}
-          className="cursor-pointer hover:opacity-80 transition-opacity disabled:opacity-50"
-          title={`Click to switch to ${mode === 'paper' ? 'live' : 'paper'} trading`}
+          className="md:hidden p-2 -ml-1 rounded-lg text-ct-text-muted hover:text-ct-text hover:bg-ct-bg-hover transition-colors"
+          onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
         >
-          <Badge variant={mode === 'paper' ? 'warning' : 'danger'}>
-            {mode === 'paper' ? '📄 Paper' : '🔴 Live'}
-          </Badge>
+          <Menu size={20} />
         </button>
-        <StatusDot
-          status={health.isLoading ? 'loading' : isOnline ? 'ok' : 'error'}
-          label={health.isLoading ? 'Connecting...' : isOnline ? 'Online' : 'Offline'}
-        />
-        <UserDropdown />
-      </div>
-    </header>
+        {/* Desktop spacer */}
+        <div className="hidden md:block" />
+
+        <div className="flex items-center gap-3 md:gap-4">
+          <button
+            onClick={handleToggleMode}
+            disabled={updateMode.isPending}
+            className="cursor-pointer hover:opacity-80 transition-opacity disabled:opacity-50"
+            title={`Click to switch to ${mode === 'paper' ? 'live' : 'paper'} trading`}
+          >
+            <Badge variant={mode === 'paper' ? 'warning' : 'danger'}>
+              {mode === 'paper' ? '📄 Paper' : '🔴 Live'}
+            </Badge>
+          </button>
+          <StatusDot
+            status={health.isLoading ? 'loading' : isOnline ? 'ok' : 'error'}
+            label={health.isLoading ? 'Connecting...' : isOnline ? 'Online' : 'Offline'}
+          />
+          <UserDropdown />
+        </div>
+      </header>
+
+      <ConfirmDialog {...dialogProps} />
+    </>
   );
 }
