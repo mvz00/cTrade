@@ -315,6 +315,10 @@ class MarketDataProvider:
                 "apiKey": api_key,
                 "secret": api_secret,
                 "enableRateLimit": True,
+                # Use millisecond nonce — CoinSpot (and some other exchanges)
+                # reject second-based nonces if a higher nonce was previously
+                # used from another tool or session.
+                "nonce": lambda: int(time.time() * 1000),
             }
             if entry.passphrase_encrypted:
                 config["password"] = vault.decrypt(entry.passphrase_encrypted)
