@@ -107,6 +107,48 @@ _TIMEFRAME_MINUTES: dict[str, int] = {
 # when the configured exchange (e.g. CoinSpot) doesn't support OHLCV.
 _BINANCE_SPOT_KLINES_URL = "https://api.binance.com/api/v3/klines"
 
+# Exchanges whose ccxt module doesn't implement parse_order(), causing
+# create_order() to throw NotSupported after the API call has already
+# succeeded.  We monkey-patch a minimal stub on these instances.
+_EXCHANGES_MISSING_PARSE_ORDER: set[str] = {"coinspot"}
+
+
+def _make_stub_parse_order(instance: Any) -> Any:
+    """Return a minimal ``parse_order`` for exchanges that don't implement it.
+
+    The returned function produces a ccxt-compatible order dict with mostly
+    ``None`` fields.  Downstream code in ``live_engine.py`` already handles
+    missing fields gracefully (falls back to ticker price and requested qty).
+    """
+
+    def _parse_order(order_data: dict, market: Any = None) -> dict:  # noqa: ARG001
+        return {
+            "id": order_data.get("id") if isinstance(order_data, dict) else None,
+            "clientOrderId": None,
+            "timestamp": None,
+            "datetime": None,
+            "lastTradeTimestamp": None,
+            "status": (
+                "open"
+                if isinstance(order_data, dict) and order_data.get("status") == "ok"
+                else None
+            ),
+            "symbol": None,
+            "type": "limit",
+            "side": None,
+            "price": None,
+            "amount": None,
+            "filled": None,
+            "remaining": None,
+            "cost": None,
+            "fee": None,
+            "average": None,
+            "trades": None,
+            "info": order_data if isinstance(order_data, dict) else {},
+        }
+
+    return _parse_order
+
 
 class MarketDataProvider:
     """Provides market data from ccxt exchanges or simulated fallback."""
@@ -376,6 +418,14 @@ class MarketDataProvider:
                             entry.name,
                             ", ".join(sorted(existing_quotes)),
                         )
+
+            # Some exchanges (e.g. CoinSpot) don't implement parse_order()
+            # in their ccxt module, causing create_order() to throw
+            # NotSupported *after* the API call has already succeeded.
+            # Provide a minimal stub so the raw response propagates back.
+            if instance.id in _EXCHANGES_MISSING_PARSE_ORDER:
+                instance.parse_order = _make_stub_parse_order(instance)
+                logger.debug("Patched parse_order for %s", instance.id)
 
             return instance
         except Exception as e:
