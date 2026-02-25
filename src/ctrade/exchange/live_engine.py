@@ -209,66 +209,117 @@ class LiveEngine:
                     self._orders.append(order)
                 return order
 
-            # Reject orders for synthetic (injected) markets — these pairs
-            # only work in paper trading mode.  The exchange's actual API
-            # doesn't support them and the ticker prices are wrong.
-            synthetic = getattr(ccxt_exchange, '_ctrade_synthetic_symbols', set())
-            if symbol in synthetic:
-                order.status = OrderStatus.REJECTED
-                order.error_message = (
-                    f"{symbol} is not available for live trading on {exchange_name}. "
-                    f"This pair only works in paper trading mode."
-                )
-                with self._data_lock:
-                    self._orders.append(order)
-                logger.warning(
-                    "Symbol %s is synthetic on %s — order rejected",
-                    symbol, exchange_name,
-                )
-                await ccxt_exchange.close()
-                return order
+            if ccxt_exchange.id == 'coinspot':
+                # ---- CoinSpot native V2 API path ----
+                # Bypass ccxt for order placement — ccxt's CoinSpot V1
+                # sign() method produces "failed signature" 401 errors.
+                # The native V2 API uses the same proven HMAC-SHA512
+                # signing as our working balance fetcher.
+                api_key, api_secret = await MarketDataProvider._get_coinspot_credentials(exchange_id)
 
-            # Auto-convert market → limit for exchanges that don't support market orders
-            if order_type == "market":
-                supports_market = ccxt_exchange.has.get("createMarketOrder", True)
-                if not supports_market:
-                    order_type = "limit"
-                    order.order_type = OrderType.LIMIT
-                    # current_price was already fetched above for size validation
-                    if price is None and current_price > 0:
+                # CoinSpot V2 always needs a price (buy/sell requires
+                # rate, swap requires amount calculation).
+                effective_price = price
+                if effective_price is None:
+                    if current_price > 0:
                         slippage = 1.005 if side == "buy" else 0.995
-                        price = round(current_price * slippage, 8)
-                        order.price = Decimal(str(price))
-                    elif price is None:
-                        # Fallback: re-fetch ticker
+                        effective_price = round(current_price * slippage, 8)
+                    else:
                         _fb_ticker = await market._try_ccxt_ticker(symbol)
                         if _fb_ticker:
                             _cp = float(_fb_ticker.last_price)
                             slippage = 1.005 if side == "buy" else 0.995
-                            price = round(_cp * slippage, 8)
-                            order.price = Decimal(str(price))
-                    logger.info(
-                        "Exchange does not support market orders — converted to limit @ %.8f for %s",
-                        price or 0,
-                        symbol,
-                    )
+                            effective_price = round(_cp * slippage, 8)
 
-            if order_type == "market":
-                if side == "buy":
-                    result = await ccxt_exchange.create_market_buy_order(symbol, quantity)
-                else:
-                    result = await ccxt_exchange.create_market_sell_order(symbol, quantity)
-            else:
-                # Limit order
-                if price is None:
+                if effective_price is None:
                     order.status = OrderStatus.REJECTED
-                    order.error_message = "Limit orders require a price"
+                    order.error_message = (
+                        f"Could not determine price for CoinSpot order on {symbol}"
+                    )
                     with self._data_lock:
                         self._orders.append(order)
+                    await ccxt_exchange.close()
+                    ccxt_exchange = None
                     return order
-                result = await ccxt_exchange.create_limit_order(
-                    symbol, side, quantity, price
+
+                order.order_type = OrderType.LIMIT
+                order.price = Decimal(str(effective_price))
+
+                logger.info(
+                    "CoinSpot native V2: %s %s qty=%.6f @ %.8f",
+                    side.upper(), symbol, quantity, effective_price,
                 )
+
+                result = await MarketDataProvider._coinspot_place_order_native(
+                    api_key, api_secret, symbol, side, quantity, effective_price,
+                )
+
+                # Close ccxt instance — only needed for exchange detection
+                await ccxt_exchange.close()
+                ccxt_exchange = None
+
+            else:
+                # ---- Standard ccxt path (non-CoinSpot exchanges) ----
+
+                # Reject orders for synthetic (injected) markets — these
+                # pairs only work in paper trading mode.
+                synthetic = getattr(ccxt_exchange, '_ctrade_synthetic_symbols', set())
+                if symbol in synthetic:
+                    order.status = OrderStatus.REJECTED
+                    order.error_message = (
+                        f"{symbol} is not available for live trading on {exchange_name}. "
+                        f"This pair only works in paper trading mode."
+                    )
+                    with self._data_lock:
+                        self._orders.append(order)
+                    logger.warning(
+                        "Symbol %s is synthetic on %s — order rejected",
+                        symbol, exchange_name,
+                    )
+                    await ccxt_exchange.close()
+                    return order
+
+                # Auto-convert market → limit for exchanges that don't support market orders
+                if order_type == "market":
+                    supports_market = ccxt_exchange.has.get("createMarketOrder", True)
+                    if not supports_market:
+                        order_type = "limit"
+                        order.order_type = OrderType.LIMIT
+                        # current_price was already fetched above for size validation
+                        if price is None and current_price > 0:
+                            slippage = 1.005 if side == "buy" else 0.995
+                            price = round(current_price * slippage, 8)
+                            order.price = Decimal(str(price))
+                        elif price is None:
+                            # Fallback: re-fetch ticker
+                            _fb_ticker = await market._try_ccxt_ticker(symbol)
+                            if _fb_ticker:
+                                _cp = float(_fb_ticker.last_price)
+                                slippage = 1.005 if side == "buy" else 0.995
+                                price = round(_cp * slippage, 8)
+                                order.price = Decimal(str(price))
+                        logger.info(
+                            "Exchange does not support market orders — converted to limit @ %.8f for %s",
+                            price or 0,
+                            symbol,
+                        )
+
+                if order_type == "market":
+                    if side == "buy":
+                        result = await ccxt_exchange.create_market_buy_order(symbol, quantity)
+                    else:
+                        result = await ccxt_exchange.create_market_sell_order(symbol, quantity)
+                else:
+                    # Limit order
+                    if price is None:
+                        order.status = OrderStatus.REJECTED
+                        order.error_message = "Limit orders require a price"
+                        with self._data_lock:
+                            self._orders.append(order)
+                        return order
+                    result = await ccxt_exchange.create_limit_order(
+                        symbol, side, quantity, price
+                    )
 
             # Parse ccxt response
             exchange_order_id = result.get("id")
@@ -281,7 +332,8 @@ class LiveEngine:
             # Kraken (and some exchanges) return average=None for market
             # orders — the fill details arrive asynchronously.  Poll
             # fetch_order once to get the actual fill price.
-            if not fill_price and exchange_order_id:
+            # Skip for CoinSpot native path (ccxt_exchange already closed).
+            if not fill_price and exchange_order_id and ccxt_exchange is not None:
                 try:
                     import asyncio as _aio
                     await _aio.sleep(0.5)  # brief pause for exchange to settle
