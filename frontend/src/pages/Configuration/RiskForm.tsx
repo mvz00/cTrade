@@ -16,6 +16,7 @@ export function RiskForm() {
   const [maxDd, setMaxDd] = useState(15);
   const [sl, setSl] = useState(3);
   const [tp, setTp] = useState(6);
+  const [slDelay, setSlDelay] = useState(1);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function RiskForm() {
       setMaxDd(Math.round(risk.max_drawdown_pct * 100));
       setSl(Math.round(risk.default_stop_loss_pct * 100));
       setTp(Math.round(risk.default_take_profit_pct * 100));
+      setSlDelay(risk.sl_rebuy_delay_hours ?? 1);
       setDirty(false);
     }
   }, [risk]);
@@ -37,6 +39,7 @@ export function RiskForm() {
         max_drawdown_pct: maxDd / 100,
         default_stop_loss_pct: sl / 100,
         default_take_profit_pct: tp / 100,
+        sl_rebuy_delay_hours: slDelay,
       },
       {
         onSuccess: () => {
@@ -115,6 +118,15 @@ export function RiskForm() {
           step={1}
           suffix="%"
         />
+        <NumberInput
+          label="Re-buy Delay After SL"
+          value={slDelay}
+          onChange={(v) => { setSlDelay(v); setDirty(true); }}
+          min={0}
+          max={72}
+          step={0.5}
+          suffix=" hrs"
+        />
       </div>
 
       <div className="mt-4 flex gap-2">
@@ -134,6 +146,7 @@ export function RiskForm() {
                 setMaxDd(Math.round(risk.max_drawdown_pct * 100));
                 setSl(Math.round(risk.default_stop_loss_pct * 100));
                 setTp(Math.round(risk.default_take_profit_pct * 100));
+                setSlDelay(risk.sl_rebuy_delay_hours ?? 1);
                 setDirty(false);
               }
             }}

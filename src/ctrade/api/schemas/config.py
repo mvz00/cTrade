@@ -65,6 +65,7 @@ class RiskConfigUpdate(BaseModel):
     max_drawdown_pct: float | None = Field(None, gt=0, le=1)
     default_stop_loss_pct: float | None = Field(None, gt=0, le=0.5)
     default_take_profit_pct: float | None = Field(None, gt=0, le=1)
+    sl_rebuy_delay_hours: float | None = Field(None, ge=0, le=72)
 
 
 class RiskConfigResponse(BaseModel):
@@ -73,6 +74,7 @@ class RiskConfigResponse(BaseModel):
     max_drawdown_pct: float
     default_stop_loss_pct: float
     default_take_profit_pct: float
+    sl_rebuy_delay_hours: float = 1.0
 
 
 # ---- Exchange ----

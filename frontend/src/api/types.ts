@@ -90,6 +90,7 @@ export interface RiskConfig {
   max_drawdown_pct: number;
   default_stop_loss_pct: number;
   default_take_profit_pct: number;
+  sl_rebuy_delay_hours: number;
 }
 
 export interface TradingPair {
@@ -309,6 +310,7 @@ export interface RiskConfigUpdate {
   max_drawdown_pct?: number;
   default_stop_loss_pct?: number;
   default_take_profit_pct?: number;
+  sl_rebuy_delay_hours?: number;
 }
 
 export interface ExchangeAddRequest {

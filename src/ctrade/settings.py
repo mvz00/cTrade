@@ -58,6 +58,7 @@ class RiskSettings(BaseModel):
     max_drawdown_pct: float = 0.15
     default_stop_loss_pct: float = 0.03
     default_take_profit_pct: float = 0.06
+    sl_rebuy_delay_hours: float = 1.0
 
 
 class StrategySettings(BaseModel):

@@ -148,6 +148,7 @@ class TradingOrchestrator:
         self._interval_seconds = 30
         self._ta_engine = TechnicalAnalysisEngine()
         self._activity_log: list[dict[str, Any]] = []
+        self._sl_history: dict[str, datetime] = {}  # pair → last SL timestamp
 
     @classmethod
     def get_instance(cls) -> TradingOrchestrator:
@@ -382,6 +383,7 @@ class TradingOrchestrator:
         max_order_usdt = trading.get("max_order_usdt", 100.0)
         stop_loss_pct = risk.get("default_stop_loss_pct", 0.03)
         take_profit_pct = risk.get("default_take_profit_pct", 0.06)
+        sl_rebuy_delay_hours = risk.get("sl_rebuy_delay_hours", 1.0)
 
         # ---- Rank pairs by volatility (biggest movers first) ----
         ranked_pairs = self._rank_pairs_by_momentum(pairs)
@@ -402,6 +404,7 @@ class TradingOrchestrator:
                     strategy_mode, short_min_1h_change_pct,
                     amplification=amplification,
                     min_hold_minutes=min_hold_minutes,
+                    sl_rebuy_delay_hours=sl_rebuy_delay_hours,
                 )
             except Exception:
                 logger.exception("Error processing pair %s", pair)
@@ -469,6 +472,7 @@ class TradingOrchestrator:
         short_min_1h_change_pct: float = 2.0,
         amplification: float = 1.0,
         min_hold_minutes: int = 15,
+        sl_rebuy_delay_hours: float = 1.0,
     ) -> None:
         """Analyze a single pair using 7-way signal fusion and potentially trade.
 
@@ -748,6 +752,7 @@ class TradingOrchestrator:
                 max_position_pct, composite, agreement,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
                 outlook=outlook, min_hold_minutes=min_hold_minutes,
+                sl_rebuy_delay_hours=sl_rebuy_delay_hours,
             )
         elif strategy_mode == "short_only":
             await self._execute_short_only(
@@ -757,6 +762,7 @@ class TradingOrchestrator:
                 short_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
                 outlook=outlook, min_hold_minutes=min_hold_minutes,
+                sl_rebuy_delay_hours=sl_rebuy_delay_hours,
             )
         elif strategy_mode == "both":
             await self._execute_both(
@@ -766,6 +772,7 @@ class TradingOrchestrator:
                 short_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
                 outlook=outlook, min_hold_minutes=min_hold_minutes,
+                sl_rebuy_delay_hours=sl_rebuy_delay_hours,
             )
 
     # ------------------------------------------------------------------
@@ -908,6 +915,16 @@ class TradingOrchestrator:
                         return True
         return False
 
+    def _is_sl_rebuy_blocked(self, pair: str, sl_rebuy_delay_hours: float) -> bool:
+        """True if pair was recently stopped-out and still within rebuy delay."""
+        if sl_rebuy_delay_hours <= 0:
+            return False
+        last_sl = self._sl_history.get(pair)
+        if last_sl is None:
+            return False
+        elapsed = (datetime.now(timezone.utc) - last_sl).total_seconds() / 3600
+        return elapsed < sl_rebuy_delay_hours
+
     async def _close_positions(
         self,
         pair: str,
@@ -961,6 +978,7 @@ class TradingOrchestrator:
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
         min_hold_minutes: int = 15,
+        sl_rebuy_delay_hours: float = 1.0,
     ) -> None:
         """Long-only mode: BUY opens long, SELL closes long."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -970,6 +988,11 @@ class TradingOrchestrator:
                 return
             existing = engine.get_positions(status="open")
             if any(p["pair_symbol"] == pair and p["side"] == "long" for p in existing):
+                return
+            if self._is_sl_rebuy_blocked(pair, sl_rebuy_delay_hours):
+                self._log_activity("signal", pair,
+                    f"BUY BLOCKED {pair}: re-buy delay active ({sl_rebuy_delay_hours}h after SL)",
+                    {"action": "REBUY_BLOCKED", "composite": composite})
                 return
             await self._open_position(
                 pair, "buy", engine, market, signal, portfolio,
@@ -998,6 +1021,7 @@ class TradingOrchestrator:
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
         min_hold_minutes: int = 15,
+        sl_rebuy_delay_hours: float = 1.0,
     ) -> None:
         """Short-only mode: SELL opens short (momentum filter), BUY closes short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -1018,6 +1042,11 @@ class TradingOrchestrator:
                 return
             existing = engine.get_positions(status="open")
             if any(p["pair_symbol"] == pair and p["side"] == "short" for p in existing):
+                return
+            if self._is_sl_rebuy_blocked(pair, sl_rebuy_delay_hours):
+                self._log_activity("signal", pair,
+                    f"SHORT BLOCKED {pair}: re-buy delay active ({sl_rebuy_delay_hours}h after SL)",
+                    {"action": "REBUY_BLOCKED", "composite": composite})
                 return
             await self._open_position(
                 pair, "sell", engine, market, signal, portfolio,
@@ -1046,6 +1075,7 @@ class TradingOrchestrator:
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
         min_hold_minutes: int = 15,
+        sl_rebuy_delay_hours: float = 1.0,
     ) -> None:
         """Both mode: BUY closes short + opens long, SELL closes long + opens short."""
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
@@ -1072,6 +1102,11 @@ class TradingOrchestrator:
                 return
             existing = engine.get_positions(status="open")
             if any(p["pair_symbol"] == pair and p["side"] == "long" for p in existing):
+                return
+            if self._is_sl_rebuy_blocked(pair, sl_rebuy_delay_hours):
+                self._log_activity("signal", pair,
+                    f"BUY BLOCKED {pair}: re-buy delay active ({sl_rebuy_delay_hours}h after SL)",
+                    {"action": "REBUY_BLOCKED", "composite": composite})
                 return
             await self._open_position(
                 pair, "buy", engine, market, signal, portfolio,
@@ -1105,6 +1140,11 @@ class TradingOrchestrator:
                 return
             existing = engine.get_positions(status="open")
             if any(p["pair_symbol"] == pair and p["side"] == "short" for p in existing):
+                return
+            if self._is_sl_rebuy_blocked(pair, sl_rebuy_delay_hours):
+                self._log_activity("signal", pair,
+                    f"SHORT BLOCKED {pair}: re-buy delay active ({sl_rebuy_delay_hours}h after SL)",
+                    {"action": "REBUY_BLOCKED", "composite": composite})
                 return
             await self._open_position(
                 pair, "sell", engine, market, signal, portfolio,
@@ -1159,6 +1199,7 @@ class TradingOrchestrator:
                             "pair": pair, "position_id": pos["id"],
                             "pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd,
                         })
+                        self._sl_history[pair] = datetime.now(timezone.utc)
                 elif pnl_pct >= take_profit_pct:
                     tp_order = await engine.close_position(pos["id"])
                     tp_status = (tp_order.status.value if tp_order and hasattr(tp_order.status, "value") else "unknown") if tp_order else "failed"
@@ -1207,6 +1248,7 @@ class TradingOrchestrator:
                             "pair": pair, "position_id": pos["id"],
                             "pnl_pct": pnl_pct * 100, "pnl_usd": pnl_usd,
                         })
+                        self._sl_history[pair] = datetime.now(timezone.utc)
 
                 elif pnl_pct >= take_profit_pct:
                     tp_order = await engine.close_position(pos["id"])
