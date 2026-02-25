@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { NumberInput } from '@/components/ui/NumberInput';
 import { useToast } from '@/components/ui/Toast';
+import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
 import { useTradingMode, useRiskConfig, useUpdateTradingMode, useUpdateRisk } from '@/api/hooks/useConfig';
 import {
   usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair, useRemoveAllPairs,
@@ -139,6 +140,7 @@ export function TradingPage() {
   const updateTrading = useUpdateTradingMode();
   const updateRisk = useUpdateRisk();
   const { toast } = useToast();
+  const { confirm, dialogProps } = useConfirm();
 
   // Initialise form values from server config (once)
   const effectiveMaxBuy = maxBuy ?? mode?.max_order_usdt ?? 100;
@@ -238,8 +240,9 @@ export function TradingPage() {
     link.click();
   }
 
-  function handleQuickBuy(symbol: string) {
-    if (!window.confirm(`Buy ${symbol} with default settings?`)) return;
+  async function handleQuickBuy(symbol: string) {
+    const ok = await confirm({ message: `Buy ${symbol} with default settings?`, confirmLabel: 'Buy', variant: 'primary' });
+    if (!ok) return;
     quickBuy.mutate({ symbol }, {
       onSuccess: (data) => {
         if (data.success) {
@@ -252,10 +255,11 @@ export function TradingPage() {
     });
   }
 
-  function handleManualBuy() {
+  async function handleManualBuy() {
     if (!manualSelectedPair) return;
     const amount = manualAmount || effectiveMaxBuy;
-    if (!window.confirm(`Buy ${manualSelectedPair} for $${amount} USDT?`)) return;
+    const ok = await confirm({ message: `Buy ${manualSelectedPair} for $${amount} USDT?`, confirmLabel: 'Buy', variant: 'primary' });
+    if (!ok) return;
     quickBuy.mutate(
       { symbol: manualSelectedPair, amount_usdt: amount },
       {
@@ -541,8 +545,14 @@ export function TradingPage() {
           <Button
             variant="ghost"
             disabled={isRunning || resetPaper.isPending}
-            onClick={() => {
-              if (window.confirm('Reset paper trading to $10,000? This clears all orders, positions, and history.')) {
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Reset Paper Trading',
+                message: 'Reset paper trading to $10,000? This clears all orders, positions, and history.',
+                confirmLabel: 'Reset',
+                variant: 'danger',
+              });
+              if (ok) {
                 resetPaper.mutate(undefined, {
                   onSuccess: () => toast('Paper trading reset to $10,000', 'success'),
                   onError: (err) => toast(err.message, 'error'),
@@ -707,8 +717,13 @@ export function TradingPage() {
             <div className="flex items-center gap-2">
               {(pairs || []).length > 0 && (
                 <button
-                  onClick={() => {
-                    if (window.confirm('Remove all watched pairs?')) {
+                  onClick={async () => {
+                    const ok = await confirm({
+                      message: 'Remove all watched pairs?',
+                      confirmLabel: 'Remove All',
+                      variant: 'danger',
+                    });
+                    if (ok) {
                       removeAllPairs.mutate(undefined, {
                         onSuccess: (data) => toast(`Removed ${data.removed} pairs`, 'success'),
                         onError: (e) => toast(e.message, 'error'),
@@ -873,6 +888,8 @@ export function TradingPage() {
           )}
         </Card>
       </div>
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }
