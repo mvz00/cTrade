@@ -20,6 +20,16 @@ router = APIRouter(prefix="/config", tags=["config"])
 
 
 def _store() -> RuntimeConfigStore:
+    if not RuntimeConfigStore.is_initialized():
+        try:
+            from ctrade.settings import get_settings
+
+            RuntimeConfigStore.initialize(get_settings())
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail="Configuration store not available. Server is still starting up.",
+            )
     return RuntimeConfigStore.get()
 
 
