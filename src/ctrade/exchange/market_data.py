@@ -316,7 +316,9 @@ class MarketDataProvider:
             if entry.passphrase_encrypted:
                 config["password"] = vault.decrypt(entry.passphrase_encrypted)
 
-            return exchange_class(config)
+            instance = exchange_class(config)
+            await instance.load_markets()
+            return instance
         except Exception as e:
             logger.warning("Failed to create ccxt exchange (id=%s): %s", exchange_id, e)
             return None
