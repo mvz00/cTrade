@@ -196,6 +196,21 @@ class LiveEngine:
                     self._orders.append(order)
                 return order
 
+            # Validate symbol exists on this exchange
+            if hasattr(ccxt_exchange, 'markets') and ccxt_exchange.markets and symbol not in ccxt_exchange.markets:
+                order.status = OrderStatus.REJECTED
+                order.error_message = (
+                    f"{symbol} is not available for live trading on {exchange_name}. "
+                    f"This pair may only work in paper trading mode."
+                )
+                with self._data_lock:
+                    self._orders.append(order)
+                logger.warning(
+                    "Symbol %s not in %s markets — order rejected",
+                    symbol, exchange_name,
+                )
+                return order
+
             # Auto-convert market → limit for exchanges that don't support market orders
             if order_type == "market":
                 supports_market = ccxt_exchange.has.get("createMarketOrder", True)

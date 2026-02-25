@@ -160,6 +160,8 @@ class MarketDataProvider:
 
         all_pairs: set[str] = set()
         all_configured_quotes: set[str] = set()
+        # Track which quote currencies received real markets from ccxt
+        quotes_with_real_markets: set[str] = set()
 
         for ex_info in exchanges_list:
             if not ex_info.get("is_active", True):
@@ -188,6 +190,7 @@ class MarketDataProvider:
                         and info.get("spot", True)
                     ):
                         all_pairs.add(symbol)
+                        quotes_with_real_markets.add(info.get("quote", ""))
             except Exception as e:
                 logger.warning(
                     "Failed to load markets from %s: %s — "
@@ -197,12 +200,12 @@ class MarketDataProvider:
             finally:
                 await exchange.close()
 
-        # Supplement with seed pairs for ALL configured quote currencies.
-        # This ensures paper trading always has pairs available even when
-        # ccxt fails to load markets from an exchange.
+        # Supplement with seed pairs only for quote currencies where NO
+        # exchange returned real markets.  This prevents showing pairs
+        # (e.g. ADA/BTC) that ccxt can't actually trade on the exchange.
         for symbol in _SEED_PRICES:
             quote = symbol.split("/")[1]
-            if quote in all_configured_quotes:
+            if quote in all_configured_quotes and quote not in quotes_with_real_markets:
                 all_pairs.add(symbol)
 
         if all_pairs:
