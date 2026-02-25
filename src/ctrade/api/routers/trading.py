@@ -113,6 +113,11 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
     market = MarketDataProvider.get_instance()
     orch = TradingOrchestrator.get_instance()
 
+    # Prevent duplicate positions on the same pair
+    existing = engine.get_positions(status="open")
+    if any(p["pair_symbol"] == body.symbol and p["side"] == "long" for p in existing):
+        raise HTTPException(status_code=409, detail=f"Position already open for {body.symbol}")
+
     # Get config defaults
     try:
         store = RuntimeConfigStore.get()
