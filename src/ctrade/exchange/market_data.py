@@ -846,6 +846,11 @@ class MarketDataProvider:
     ) -> dict[str, Any]:
         """Place an order on CoinSpot via native V2 API.
 
+        **IMPORTANT**: Requires a **full-access** CoinSpot API key.
+        Read-only keys (used for ``/api/v2/ro/my/balances``) will NOT
+        work for order placement.  Generate a full-access key in the
+        CoinSpot API settings dashboard.
+
         Routes to the correct endpoint based on quote currency:
 
         - **AUD/USDT pairs** → ``POST /api/v2/my/{buy|sell}`` with
@@ -856,6 +861,9 @@ class MarketDataProvider:
         Swap semantics:
         - BUY ADA/BTC  = sell BTC to buy ADA, amount = qty × price (BTC)
         - SELL ADA/BTC = sell ADA to get BTC, amount = qty (ADA)
+
+        Note: ``amount`` and ``rate`` are sent as JSON strings per
+        CoinSpot V2 API requirements.
 
         Returns a ccxt-compatible order dict so ``live_engine.py`` result
         parsing works unchanged.
@@ -870,8 +878,8 @@ class MarketDataProvider:
             endpoint = f"/api/v2/my/{'buy' if side == 'buy' else 'sell'}"
             payload: dict[str, Any] = {
                 "cointype": base,
-                "amount": quantity,
-                "rate": price,
+                "amount": str(quantity),
+                "rate": str(price),
                 "markettype": quote.lower(),
             }
             logger.info(
@@ -895,7 +903,7 @@ class MarketDataProvider:
                 payload = {
                     "cointypesell": "BTC",
                     "cointypebuy": base,
-                    "amount": swap_amount,
+                    "amount": str(swap_amount),
                 }
                 logger.info(
                     "CoinSpot V2 swap (buy %s): sell %.8f BTC → buy %s",
@@ -907,7 +915,7 @@ class MarketDataProvider:
                 payload = {
                     "cointypesell": base,
                     "cointypebuy": "BTC",
-                    "amount": quantity,
+                    "amount": str(quantity),
                 }
                 logger.info(
                     "CoinSpot V2 swap (sell %s): sell %.6f %s → buy BTC",
@@ -926,6 +934,13 @@ class MarketDataProvider:
 
         # Validate response
         if data.get("status") != "ok":
+            logger.error(
+                "CoinSpot V2 API error: %s | endpoint=%s | payload=%s | response=%s",
+                data.get("message", "unknown error"),
+                endpoint,
+                {k: v for k, v in payload.items() if k != "nonce"},
+                data,
+            )
             raise RuntimeError(
                 f"CoinSpot V2 API error: {data.get('message', 'unknown error')}"
             )
