@@ -118,11 +118,24 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
     if any(p["pair_symbol"] == body.symbol and p["side"] == "long" for p in existing):
         raise HTTPException(status_code=409, detail=f"Position already open for {body.symbol}")
 
-    # Get config defaults
+    # Route to correct exchange based on pair's quote currency
+    exchange_name = "paper"
+    exchange_id: str | None = None
     try:
         store = RuntimeConfigStore.get()
         trading = store.get_trading()
-        risk = store.get_effective_risk(None)
+        pair_entry = store.find_exchange_for_pair(body.symbol)
+        if pair_entry:
+            exchange_name = pair_entry.name
+            exchange_id = pair_entry.id
+        else:
+            exchanges = store.list_exchanges()
+            if exchanges:
+                ex_entry = store.get_exchange_entry(exchanges[0]["id"])
+                if ex_entry:
+                    exchange_name = ex_entry.name
+                    exchange_id = exchanges[0]["id"]
+        risk = store.get_effective_risk(exchange_id)
     except RuntimeError:
         trading = {}
         risk = {}
@@ -148,18 +161,6 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
     sl_price = round(price * (1 - stop_loss_pct), 8)
     tp_price = round(price * (1 + take_profit_pct), 8)
 
-    # Resolve exchange name
-    exchange_name = "paper"
-    try:
-        store = RuntimeConfigStore.get()
-        exchanges = store.list_exchanges()
-        if exchanges:
-            ex_entry = store.get_exchange_entry(exchanges[0]["id"])
-            if ex_entry:
-                exchange_name = ex_entry.name
-    except RuntimeError:
-        pass
-
     order = await engine.place_order(
         symbol=body.symbol,
         side="buy",
@@ -171,6 +172,7 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
         stop_loss=sl_price,
         take_profit=tp_price,
         exchange_name=exchange_name,
+        exchange_id=exchange_id,
     )
 
     order_status = order.status.value if hasattr(order.status, "value") else str(order.status)

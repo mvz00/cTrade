@@ -357,19 +357,21 @@ class TradingOrchestrator:
             except Exception:
                 logger.debug("Could not refresh live prices")
 
+        store = None
         try:
             store = RuntimeConfigStore.get()
             strategy = store.get_strategy()
             trading = store.get_trading()
-            # Determine active exchange for per-exchange risk
             exchanges = store.list_exchanges()
-            self._active_exchange_id = exchanges[0]["id"] if exchanges else None
-            risk = store.get_effective_risk(self._active_exchange_id)
+            # Global risk fallback (used when no per-pair exchange match)
+            default_exchange_id = exchanges[0]["id"] if exchanges else None
+            risk = store.get_effective_risk(default_exchange_id)
         except RuntimeError:
             strategy = {}
             risk = {}
             trading = {}
-            self._active_exchange_id = None
+            exchanges = []
+            default_exchange_id = None
 
         # ---- Risk appetite → dynamic thresholds + amplification ----
         risk_appetite = strategy.get("risk_appetite", 5)
@@ -378,12 +380,8 @@ class TradingOrchestrator:
         exit_threshold = 0.50 - half_zone               # 0.40 → 0.49
         amplification = 1.0 + (risk_appetite - 1) * 0.167  # 1.0 → 2.5
 
-        max_position_pct = risk.get("max_position_pct", 0.10)
         max_open = trading.get("max_open_positions", 5)
         max_order_usdt = trading.get("max_order_usdt", 100.0)
-        stop_loss_pct = risk.get("default_stop_loss_pct", 0.03)
-        take_profit_pct = risk.get("default_take_profit_pct", 0.06)
-        sl_rebuy_delay_hours = risk.get("sl_rebuy_delay_hours", 1.0)
 
         # ---- Rank pairs by volatility (biggest movers first) ----
         ranked_pairs = self._rank_pairs_by_momentum(pairs)
@@ -393,18 +391,32 @@ class TradingOrchestrator:
         min_hold_minutes = strategy.get("min_hold_minutes", 15)
 
         for pair in ranked_pairs:
+            # Route pair to its exchange based on quote currency
+            pair_ex = store.find_exchange_for_pair(pair) if store else None
+            self._active_exchange_id = (
+                pair_ex.id if pair_ex
+                else default_exchange_id
+            )
+            pair_risk = store.get_effective_risk(self._active_exchange_id) if store else risk
+
+            # Per-pair risk values (may differ if exchange has risk overrides)
+            p_max_pos = pair_risk.get("max_position_pct", 0.10)
+            p_sl = pair_risk.get("default_stop_loss_pct", 0.03)
+            p_tp = pair_risk.get("default_take_profit_pct", 0.06)
+            p_sl_rebuy = pair_risk.get("sl_rebuy_delay_hours", 1.0)
+
             try:
                 await self._process_pair(
                     pair, engine, market, signal_mgr,
                     entry_threshold, exit_threshold,
-                    max_position_pct, max_open,
+                    p_max_pos, max_open,
                     max_order_usdt,
-                    stop_loss_pct, take_profit_pct,
+                    p_sl, p_tp,
                     strategy,
                     strategy_mode, short_min_1h_change_pct,
                     amplification=amplification,
                     min_hold_minutes=min_hold_minutes,
-                    sl_rebuy_delay_hours=sl_rebuy_delay_hours,
+                    sl_rebuy_delay_hours=p_sl_rebuy,
                 )
             except Exception:
                 logger.exception("Error processing pair %s", pair)
@@ -860,6 +872,7 @@ class TradingOrchestrator:
                 stop_loss=sl_price,
                 take_profit=tp_price,
                 exchange_name=exchange_name,
+                exchange_id=active_ex_id,
             )
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
             logger.info(
