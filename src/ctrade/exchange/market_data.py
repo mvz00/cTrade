@@ -88,6 +88,10 @@ _TIMEFRAME_MINUTES: dict[str, int] = {
     "1h": 60, "4h": 240, "1d": 1440, "1w": 10080,
 }
 
+# Binance public spot klines (no auth required) — used as candle fallback
+# when the configured exchange (e.g. CoinSpot) doesn't support OHLCV.
+_BINANCE_SPOT_KLINES_URL = "https://api.binance.com/api/v3/klines"
+
 
 class MarketDataProvider:
     """Provides market data from ccxt exchanges or simulated fallback."""
@@ -218,10 +222,28 @@ class MarketDataProvider:
     async def get_candles(
         self, symbol: str, timeframe: str = "1h", limit: int = 100
     ) -> list[Candle]:
-        """Get OHLCV candles for a symbol."""
+        """Get OHLCV candles for a symbol.
+
+        Tries three sources in order:
+        1. ccxt exchange (authenticated, exchange-native OHLCV)
+        2. Binance public spot API (unauthenticated, real market data)
+        3. Simulated candles (deterministic random walk, last resort)
+        """
+        # 1. Try the configured exchange via ccxt
         candles = await self._try_ccxt_candles(symbol, timeframe, limit)
         if candles:
             return candles
+
+        # 2. Try Binance public spot klines (no auth needed)
+        candles = await self._try_binance_public_candles(symbol, timeframe, limit)
+        if candles:
+            return candles
+
+        # 3. Last resort: simulated data
+        logger.warning(
+            "Using simulated candles for %s (ccxt and Binance public both unavailable)",
+            symbol,
+        )
         return self._simulated_candles(symbol, timeframe, limit)
 
     async def _create_ccxt_exchange(self, exchange_id: str | None = None) -> Any | None:
@@ -476,10 +498,86 @@ class MarketDataProvider:
                 ))
             return candles
         except Exception as e:
-            logger.debug("ccxt candle fetch failed for %s: %s", symbol, e)
+            logger.info("ccxt candle fetch failed for %s: %s — will try Binance public fallback", symbol, e)
             return None
         finally:
             await exchange.close()
+
+    async def _try_binance_public_candles(
+        self, symbol: str, timeframe: str, limit: int
+    ) -> list[Candle] | None:
+        """Try to fetch candles from Binance public spot API (no auth needed).
+
+        Maps any pair (e.g. "BTC/AUD", "ETH/USDT") to the Binance USDT pair
+        by extracting the base currency.  This provides real market data for
+        exchanges that don't support OHLCV via ccxt (like CoinSpot).
+
+        Note: Prices will be in USDT, not the original quote currency.
+        For technical analysis this is acceptable since TA indicators care
+        about relative price movement (trends, momentum), not absolute prices.
+        """
+        import aiohttp
+
+        base = symbol.split("/")[0] if "/" in symbol else symbol
+        binance_sym = f"{base}USDT"
+
+        params = {
+            "symbol": binance_sym,
+            "interval": timeframe,
+            "limit": str(limit),
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    _BINANCE_SPOT_KLINES_URL,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug(
+                            "Binance public klines HTTP %d for %s",
+                            resp.status, binance_sym,
+                        )
+                        return None
+                    klines = await resp.json()
+
+            if not klines or not isinstance(klines, list):
+                return None
+
+            tf_enum = (
+                Timeframe(timeframe)
+                if timeframe in [t.value for t in Timeframe]
+                else Timeframe.H1
+            )
+
+            candles: list[Candle] = []
+            for k in klines:
+                # Binance kline format:
+                # [open_time, open, high, low, close, volume, close_time, ...]
+                candles.append(Candle(
+                    time=datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc),
+                    pair_symbol=symbol,  # Keep original symbol for downstream
+                    timeframe=tf_enum,
+                    open=Decimal(str(k[1])),
+                    high=Decimal(str(k[2])),
+                    low=Decimal(str(k[3])),
+                    close=Decimal(str(k[4])),
+                    volume=Decimal(str(k[5])),
+                ))
+
+            logger.info(
+                "Binance public klines OK: %s → %s, %d candles, tf=%s",
+                symbol, binance_sym, len(candles), timeframe,
+            )
+            return candles
+
+        except Exception as e:
+            logger.debug(
+                "Binance public klines failed for %s (%s): %s",
+                symbol, binance_sym, e,
+            )
+            return None
 
     # ---- Live exchange balance ----
 
@@ -980,14 +1078,14 @@ class MarketDataProvider:
         for i in range(limit):
             t = now - timedelta(minutes=minutes * (limit - i))
             # Trend + noise
-            trend = math.sin(i / 20) * 0.002
-            noise = rng.gauss(0, 0.005)
+            trend = math.sin(i / 20) * 0.008
+            noise = rng.gauss(0, 0.02)
             change = trend + noise
 
             open_price = price
             close_price = price * (1 + change)
-            high = max(open_price, close_price) * (1 + abs(rng.gauss(0, 0.002)))
-            low = min(open_price, close_price) * (1 - abs(rng.gauss(0, 0.002)))
+            high = max(open_price, close_price) * (1 + abs(rng.gauss(0, 0.008)))
+            low = min(open_price, close_price) * (1 - abs(rng.gauss(0, 0.008)))
             volume = rng.uniform(100, 5000)
 
             candles.append(Candle(
