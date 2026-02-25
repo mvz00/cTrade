@@ -610,6 +610,7 @@ export function TradingPage() {
                     <th className="pb-2">Side</th>
                     <th className="pb-2">Qty</th>
                     <th className="pb-2">Entry</th>
+                    <th className="pb-2">Investment</th>
                     <th className="pb-2">SL / TP</th>
                     <th className="pb-2">P&L</th>
                     <th className="pb-2"></th>
@@ -626,6 +627,7 @@ export function TradingPage() {
                         </td>
                         <td>{formatNumber(p.quantity, 6)}</td>
                         <td>{formatUSD(p.entry_price)}</td>
+                        <td>{formatUSD(p.entry_price * p.quantity)}</td>
                         <td className="text-xs text-ct-text-dim">
                           {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
                           {' / '}
@@ -651,7 +653,7 @@ export function TradingPage() {
                       </tr>
                       {p.justification && (
                         <tr>
-                          <td colSpan={8} className="pb-2 px-1">
+                          <td colSpan={9} className="pb-2 px-1">
                             <p className="text-xs text-ct-text-dim italic leading-relaxed">
                               {p.justification}
                             </p>
