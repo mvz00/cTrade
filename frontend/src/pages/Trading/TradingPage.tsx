@@ -381,6 +381,100 @@ export function TradingPage() {
         )}
       </Card>
 
+      {/* ── Open Positions (full width, directly below activity) ── */}
+      <Card className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">
+            Open Positions ({(positions || []).length})
+          </h3>
+          {(positions || []).length > 0 && (
+            <Button
+              variant="danger"
+              onClick={() => closeAllPos.mutate(undefined, {
+                onSuccess: (data) => {
+                  const msg = data.failed > 0
+                    ? `Closed ${data.closed}, ${data.failed} failed`
+                    : `Closed ${data.closed} positions`;
+                  toast(msg, data.failed > 0 ? 'error' : 'success');
+                },
+                onError: (e) => toast(e.message, 'error'),
+              })}
+              disabled={closeAllPos.isPending}
+            >
+              <X size={12} /> Close All
+            </Button>
+          )}
+        </div>
+        {(positions || []).length === 0 ? (
+          <p className="text-sm text-ct-text-dim py-8 text-center">No open positions</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-ct-border text-ct-text-muted text-left">
+                  <th className="pb-2">Pair</th>
+                  <th className="pb-2">Exchange</th>
+                  <th className="pb-2">Side</th>
+                  <th className="pb-2">Qty</th>
+                  <th className="pb-2">Entry</th>
+                  <th className="pb-2">Investment</th>
+                  <th className="pb-2">SL / TP</th>
+                  <th className="pb-2">P&L</th>
+                  <th className="pb-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(positions || []).map(p => (
+                  <Fragment key={p.id}>
+                    <tr className="border-b border-ct-border/50">
+                      <td className="py-2 font-mono">{p.pair_symbol}</td>
+                      <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
+                      <td>
+                        <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
+                      </td>
+                      <td>{formatNumber(p.quantity, 6)}</td>
+                      <td>{formatUSD(p.entry_price)}</td>
+                      <td>{formatUSD(p.entry_price * p.quantity)}</td>
+                      <td className="text-xs text-ct-text-dim">
+                        {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
+                        {' / '}
+                        {p.take_profit ? formatUSD(p.take_profit) : '—'}
+                      </td>
+                      <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
+                        {formatUSD(p.unrealized_pnl ?? 0)}
+                        <span className="text-xs text-ct-text-dim ml-1">
+                          ({(p.unrealized_pnl_pct ?? 0).toFixed(2)}%)
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => closePos.mutate(p.id, {
+                            onSuccess: () => toast('Position closed', 'success'),
+                            onError: (e) => toast(e.message, 'error'),
+                          })}
+                          className="text-ct-text-dim hover:text-ct-red"
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                    {p.justification && (
+                      <tr>
+                        <td colSpan={9} className="pb-2 px-1">
+                          <p className="text-xs text-ct-text-dim italic leading-relaxed">
+                            {p.justification}
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       {/* ── Auto-Trading Control Panel ── */}
       <Card className="mb-6 border-ct-accent/20">
         <div className="flex items-center gap-2 mb-4">
@@ -522,100 +616,6 @@ export function TradingPage() {
           </div>
         </Card>
       </div>
-
-      {/* ── Open Positions (full width) ── */}
-      <Card className="mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">
-            Open Positions ({(positions || []).length})
-          </h3>
-          {(positions || []).length > 0 && (
-            <Button
-              variant="danger"
-              onClick={() => closeAllPos.mutate(undefined, {
-                onSuccess: (data) => {
-                  const msg = data.failed > 0
-                    ? `Closed ${data.closed}, ${data.failed} failed`
-                    : `Closed ${data.closed} positions`;
-                  toast(msg, data.failed > 0 ? 'error' : 'success');
-                },
-                onError: (e) => toast(e.message, 'error'),
-              })}
-              disabled={closeAllPos.isPending}
-            >
-              <X size={12} /> Close All
-            </Button>
-          )}
-        </div>
-        {(positions || []).length === 0 ? (
-          <p className="text-sm text-ct-text-dim py-8 text-center">No open positions</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-ct-border text-ct-text-muted text-left">
-                  <th className="pb-2">Pair</th>
-                  <th className="pb-2">Exchange</th>
-                  <th className="pb-2">Side</th>
-                  <th className="pb-2">Qty</th>
-                  <th className="pb-2">Entry</th>
-                  <th className="pb-2">Investment</th>
-                  <th className="pb-2">SL / TP</th>
-                  <th className="pb-2">P&L</th>
-                  <th className="pb-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(positions || []).map(p => (
-                  <Fragment key={p.id}>
-                    <tr className="border-b border-ct-border/50">
-                      <td className="py-2 font-mono">{p.pair_symbol}</td>
-                      <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
-                      <td>
-                        <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
-                      </td>
-                      <td>{formatNumber(p.quantity, 6)}</td>
-                      <td>{formatUSD(p.entry_price)}</td>
-                      <td>{formatUSD(p.entry_price * p.quantity)}</td>
-                      <td className="text-xs text-ct-text-dim">
-                        {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
-                        {' / '}
-                        {p.take_profit ? formatUSD(p.take_profit) : '—'}
-                      </td>
-                      <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                        {formatUSD(p.unrealized_pnl ?? 0)}
-                        <span className="text-xs text-ct-text-dim ml-1">
-                          ({(p.unrealized_pnl_pct ?? 0).toFixed(2)}%)
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          onClick={() => closePos.mutate(p.id, {
-                            onSuccess: () => toast('Position closed', 'success'),
-                            onError: (e) => toast(e.message, 'error'),
-                          })}
-                          className="text-ct-text-dim hover:text-ct-red"
-                        >
-                          <X size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                    {p.justification && (
-                      <tr>
-                        <td colSpan={9} className="pb-2 px-1">
-                          <p className="text-xs text-ct-text-dim italic leading-relaxed">
-                            {p.justification}
-                          </p>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
 
       {/* ── Watched Pairs (1/3) + Trade History (2/3) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
