@@ -81,6 +81,7 @@ export interface StrategyConfig {
   risk_appetite: number;
   entry_confidence_threshold: number;
   exit_confidence_threshold: number;
+  min_hold_minutes: number;
 }
 
 export interface RiskConfig {
@@ -299,6 +300,7 @@ export interface StrategyConfigUpdate {
   risk_appetite?: number;
   entry_confidence_threshold?: number;
   exit_confidence_threshold?: number;
+  min_hold_minutes?: number;
 }
 
 export interface RiskConfigUpdate {

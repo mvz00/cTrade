@@ -40,6 +40,7 @@ export function StrategyForm() {
   const [strategyMode, setStrategyMode] = useState('long_only');
   const [shortMinChange, setShortMinChange] = useState(2.0);
   const [riskAppetite, setRiskAppetite] = useState(5);
+  const [minHold, setMinHold] = useState(15);
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -54,6 +55,7 @@ export function StrategyForm() {
       setStrategyMode(strategy.strategy_mode || 'long_only');
       setShortMinChange(strategy.short_min_1h_change_pct ?? 2.0);
       setRiskAppetite(strategy.risk_appetite ?? 5);
+      setMinHold(strategy.min_hold_minutes ?? 15);
       setDirty(false);
     }
   }, [strategy]);
@@ -76,6 +78,7 @@ export function StrategyForm() {
         strategy_mode: strategyMode,
         short_min_1h_change_pct: shortMinChange,
         risk_appetite: riskAppetite,
+        min_hold_minutes: minHold,
       },
       {
         onSuccess: () => {
@@ -126,6 +129,16 @@ export function StrategyForm() {
             suffix="%"
           />
         )}
+
+        <NumberInput
+          label="Min Hold Period"
+          value={minHold}
+          onChange={(v) => { setMinHold(v); setDirty(true); }}
+          min={0}
+          max={120}
+          step={1}
+          suffix=" min"
+        />
 
         <div className="border-t border-ct-border pt-3 mt-3">
           <p className="text-xs font-medium text-ct-text-dim mb-2">Risk Appetite</p>
@@ -234,6 +247,7 @@ export function StrategyForm() {
                 setStrategyMode(strategy.strategy_mode || 'long_only');
                 setShortMinChange(strategy.short_min_1h_change_pct ?? 2.0);
                 setRiskAppetite(strategy.risk_appetite ?? 5);
+                setMinHold(strategy.min_hold_minutes ?? 15);
                 setDirty(false);
               }
             }}

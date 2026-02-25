@@ -37,6 +37,7 @@ class StrategyConfigUpdate(BaseModel):
     risk_appetite: int | None = Field(None, ge=1, le=10)
     entry_confidence_threshold: float | None = Field(None, ge=0, le=1)
     exit_confidence_threshold: float | None = Field(None, ge=0, le=1)
+    min_hold_minutes: int | None = Field(None, ge=0, le=120)
 
 
 class StrategyConfigResponse(BaseModel):
@@ -53,6 +54,7 @@ class StrategyConfigResponse(BaseModel):
     risk_appetite: int = 5
     entry_confidence_threshold: float
     exit_confidence_threshold: float
+    min_hold_minutes: int = 15
 
 
 # ---- Risk ----

@@ -84,6 +84,7 @@ class StrategySettings(BaseModel):
     macd_signal: int = 9
     bb_period: int = 20
     bb_std: float = 2.0
+    min_hold_minutes: int = 15
 
 
 class FeedSettings(BaseModel):

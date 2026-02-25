@@ -92,6 +92,7 @@ class RuntimeConfigStore:
             "risk_appetite": settings.strategy.risk_appetite,
             "entry_confidence_threshold": settings.strategy.entry_confidence_threshold,
             "exit_confidence_threshold": settings.strategy.exit_confidence_threshold,
+            "min_hold_minutes": settings.strategy.min_hold_minutes,
         }
         self._risk: dict[str, Any] = {
             "max_position_pct": settings.risk.max_position_pct,
