@@ -104,6 +104,16 @@ class RuntimeConfigStore:
         }
         self._exchanges: list[ExchangeEntry] = []
         self._feed_credentials: dict[str, dict[str, bytes]] = {}
+        self._email: dict[str, Any] = {
+            "enabled": False,
+            "smtp_host": "",
+            "smtp_port": 587,
+            "username": "",
+            "password_encrypted": "",  # base64-encoded encrypted bytes
+            "from_address": "",
+            "to_address": "",
+            "use_tls": True,
+        }
         self._data_lock = threading.Lock()
 
         # Restore persisted state (overlays on top of defaults)
@@ -190,6 +200,7 @@ class RuntimeConfigStore:
                 "risk": risk,
                 "exchanges": exchanges_data,
                 "feed_credentials": feed_creds_data,
+                "email": dict(self._email),
             }
 
             async def _do_save() -> None:
@@ -253,6 +264,7 @@ class RuntimeConfigStore:
                 "risk": dict(self._risk),
                 "exchanges": exchanges_data,
                 "feed_credentials": feed_creds_data,
+                "email": dict(self._email),
             }
 
             # Ensure config directory exists
@@ -368,6 +380,10 @@ class RuntimeConfigStore:
                         )
                 self._feed_credentials = restored_creds
 
+            # Restore email notification settings
+            if "email" in state and isinstance(state["email"], dict):
+                self._email.update(state["email"])
+
             logger.info(
                 "Restored config state from disk (%d exchanges, %d feed credentials)",
                 len(self._exchanges),
@@ -457,6 +473,9 @@ class RuntimeConfigStore:
                         )
                 self._feed_credentials = restored_creds
 
+            if "email" in loaded and isinstance(loaded["email"], dict):
+                self._email.update(loaded["email"])
+
         logger.info(
             "Restored config from DB (%d exchanges, %d feed credentials)",
             len(self._exchanges),
@@ -522,6 +541,61 @@ class RuntimeConfigStore:
         self._save_to_disk()
         self._save_to_db()
         return result
+
+    # ---- Email notification config ----
+
+    def get_email(self) -> dict[str, Any]:
+        with self._data_lock:
+            return dict(self._email)
+
+    def update_email(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """Update email notification settings.
+
+        If ``password`` is provided in updates, it is encrypted via Vault
+        and stored as ``password_encrypted``.  The raw password is never
+        persisted.
+        """
+        raw_password = updates.pop("password", None)
+        if raw_password and raw_password != "\u2022\u2022\u2022\u2022\u2022\u2022":
+            # Encrypt the password before storage
+            try:
+                from ctrade.settings import get_settings
+                key = get_settings().encryption_key.get_secret_value()
+                if key:
+                    vault = Vault(key)
+                    encrypted = vault.encrypt(raw_password)
+                    updates["password_encrypted"] = base64.b64encode(encrypted).decode()
+                else:
+                    logger.warning("No encryption key — email password stored as plaintext")
+                    updates["password_encrypted"] = base64.b64encode(
+                        raw_password.encode()
+                    ).decode()
+            except Exception:
+                logger.warning("Failed to encrypt email password", exc_info=True)
+
+        with self._data_lock:
+            self._email.update(updates)
+            result = dict(self._email)
+        self._save_to_disk()
+        self._save_to_db()
+        return result
+
+    def get_email_password_decrypted(self) -> str:
+        """Return the decrypted SMTP password, or empty string."""
+        with self._data_lock:
+            enc_b64 = self._email.get("password_encrypted", "")
+        if not enc_b64:
+            return ""
+        try:
+            from ctrade.settings import get_settings
+            key = get_settings().encryption_key.get_secret_value()
+            if not key:
+                return base64.b64decode(enc_b64).decode()
+            vault = Vault(key)
+            return vault.decrypt(base64.b64decode(enc_b64))
+        except Exception:
+            logger.warning("Failed to decrypt email password", exc_info=True)
+            return ""
 
     def get_effective_risk(self, exchange_id: str | None = None) -> dict[str, Any]:
         """Return risk config with per-exchange overrides applied.

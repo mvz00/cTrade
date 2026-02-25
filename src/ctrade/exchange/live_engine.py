@@ -78,6 +78,36 @@ class LiveEngine:
         except Exception:
             pass  # EventBus not running yet — swallow silently
 
+    @staticmethod
+    async def _notify_order_fill(order: Any, mode: str = "live") -> None:
+        """Send order-fill notification to all registered channels."""
+        try:
+            from ctrade.notifications.channels.router import NotificationRouter
+            router = NotificationRouter.get_instance()
+            if not router.list_channels():
+                return
+            side = order.side.value if hasattr(order.side, "value") else str(order.side)
+            qty = float(order.filled_quantity) if order.filled_quantity else 0
+            price = float(order.avg_fill_price) if order.avg_fill_price else 0
+            fee = float(order.fee) if order.fee else 0
+            symbol = order.pair_symbol
+            message = f"{side.upper()} {qty:.6g} {symbol} filled @ {price:.8g} ({mode} mode)"
+            await router.dispatch(
+                message=message,
+                severity="success",
+                metadata={
+                    "title": f"Order Filled: {side.upper()} {symbol}",
+                    "pair": symbol,
+                    "side": side.upper(),
+                    "quantity": qty,
+                    "price": price,
+                    "fee": fee,
+                    "mode": mode,
+                },
+            )
+        except Exception:
+            pass  # Non-fatal — don't break order flow
+
     # ---- Watched pairs (delegated to PaperEngine — shared state) ----
 
     def get_watched_pairs(self) -> list[str]:
@@ -384,6 +414,9 @@ class LiveEngine:
                 "fee": float(order.fee),
                 "mode": "live",
             })
+
+            # Notify all channels (email, Discord, Telegram)
+            fire_and_forget(self._notify_order_fill(order, mode="live"))
 
             logger.info(
                 "LIVE %s %s: qty=%.6f @ %.4f (fee=%.4f %s) exchange_id=%s",

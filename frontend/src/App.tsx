@@ -6,7 +6,6 @@ import { TradingPage } from '@/pages/Trading/TradingPage';
 import { ConfigPage } from '@/pages/Configuration/ConfigPage';
 import { ConnectionsPage } from '@/pages/Connections/ConnectionsPage';
 import { SignalsPage } from '@/pages/Signals/SignalsPage';
-import { BacktestPage } from '@/pages/Backtesting/BacktestPage';
 import { AlertsPage } from '@/pages/Alerts/AlertsPage';
 import { AccountPage } from '@/pages/Account/AccountPage';
 import { ScreenerPage } from '@/pages/Screener/ScreenerPage';
@@ -55,7 +54,6 @@ export function App() {
             <Route path={ROUTES.SIGNALS} element={<SignalsPage />} />
             <Route path={ROUTES.INTELLIGENCE} element={<IntelligencePage />} />
             <Route path={ROUTES.SCREENER} element={<ScreenerPage />} />
-            <Route path={ROUTES.BACKTESTING} element={<BacktestPage />} />
             <Route path={ROUTES.ALERTS} element={<AlertsPage />} />
             <Route path={ROUTES.ACCOUNT} element={<AccountPage />} />
           </Route>

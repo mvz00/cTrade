@@ -7,7 +7,6 @@ import {
   Activity,
   Brain,
   Flame,
-  FlaskConical,
   Bell,
   UserCog,
   ChevronLeft,
@@ -25,7 +24,6 @@ const navItems = [
   { to: ROUTES.SIGNALS, icon: Activity, label: 'Signals' },
   { to: ROUTES.INTELLIGENCE, icon: Brain, label: 'Intelligence' },
   { to: ROUTES.SCREENER, icon: Flame, label: 'Screener' },
-  { to: ROUTES.BACKTESTING, icon: FlaskConical, label: 'Backtesting' },
   { to: ROUTES.ALERTS, icon: Bell, label: 'Alerts' },
 ];
 

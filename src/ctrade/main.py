@@ -194,6 +194,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
             )
 
+        # Email channel — configured via dashboard UI (RuntimeConfigStore)
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+            if RuntimeConfigStore.is_initialized():
+                email_cfg = RuntimeConfigStore.get().get_email()
+                if (
+                    email_cfg.get("enabled")
+                    and email_cfg.get("smtp_host")
+                    and email_cfg.get("to_address")
+                ):
+                    from ctrade.notifications.channels.email import EmailChannel
+                    smtp_password = RuntimeConfigStore.get().get_email_password_decrypted()
+                    notification_router.register(
+                        EmailChannel(
+                            smtp_host=email_cfg["smtp_host"],
+                            smtp_port=email_cfg.get("smtp_port", 587),
+                            username=email_cfg.get("username", ""),
+                            password=smtp_password,
+                            from_address=email_cfg.get("from_address", ""),
+                            to_address=email_cfg["to_address"],
+                            use_tls=email_cfg.get("use_tls", True),
+                        )
+                    )
+        except Exception as email_err:
+            print(f"[cTrade]        Email channel setup failed (non-fatal): {email_err}", flush=True)
+
         channels = notification_router.list_channels()
         if channels:
             print(f"[cTrade] [6/6] Notifications: {', '.join(channels)}", flush=True)
