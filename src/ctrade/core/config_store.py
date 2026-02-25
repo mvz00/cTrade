@@ -100,6 +100,7 @@ class RuntimeConfigStore:
             "max_drawdown_pct": settings.risk.max_drawdown_pct,
             "default_stop_loss_pct": settings.risk.default_stop_loss_pct,
             "default_take_profit_pct": settings.risk.default_take_profit_pct,
+            "sl_rebuy_delay_hours": settings.risk.sl_rebuy_delay_hours,
         }
         self._exchanges: list[ExchangeEntry] = []
         self._feed_credentials: dict[str, dict[str, bytes]] = {}

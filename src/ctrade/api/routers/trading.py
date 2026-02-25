@@ -127,6 +127,11 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
         trading = {}
         risk = {}
 
+    # Prevent rebuy during SL delay
+    sl_rebuy_delay_hours = risk.get("sl_rebuy_delay_hours", 1.0)
+    if orch._is_sl_rebuy_blocked(body.symbol, sl_rebuy_delay_hours):
+        raise HTTPException(status_code=409, detail=f"Re-buy blocked: {body.symbol} hit stop-loss recently")
+
     max_order_usdt = trading.get("max_order_usdt", 100.0)
     stop_loss_pct = risk.get("default_stop_loss_pct", 0.03)
     take_profit_pct = risk.get("default_take_profit_pct", 0.06)

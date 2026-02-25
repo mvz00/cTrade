@@ -1040,7 +1040,12 @@ class MarketDataProvider:
     def _simulated_ticker(self, symbol: str) -> Ticker:
         """Generate a simulated ticker with realistic price movement."""
         with self._data_lock:
-            base_price = self._sim_prices.get(symbol, 100.0)
+            base_price = self._sim_prices.get(symbol)
+            if base_price is None:
+                base_price = _SEED_PRICES.get(symbol)
+            if base_price is None:
+                base_coin = symbol.split("/")[0] if "/" in symbol else symbol
+                base_price = 1.0 if base_coin in _CASH_CURRENCIES else 100.0
             # Random walk: ±0.3% per tick
             change_pct = self._sim_rng.gauss(0, 0.003)
             new_price = base_price * (1 + change_pct)
@@ -1065,7 +1070,10 @@ class MarketDataProvider:
         """Generate simulated candle history with deterministic random walk."""
         minutes = _TIMEFRAME_MINUTES.get(timeframe, 60)
         tf_enum = Timeframe(timeframe) if timeframe in [t.value for t in Timeframe] else Timeframe.H1
-        base = _SEED_PRICES.get(symbol, 100.0)
+        base = _SEED_PRICES.get(symbol)
+        if base is None:
+            base_coin = symbol.split("/")[0] if "/" in symbol else symbol
+            base = 1.0 if base_coin in _CASH_CURRENCIES else 100.0
 
         # Use symbol+timeframe as seed for reproducibility
         seed = int(hashlib.md5(f"{symbol}:{timeframe}".encode()).hexdigest()[:8], 16)
