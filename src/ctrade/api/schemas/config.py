@@ -77,6 +77,30 @@ class RiskConfigResponse(BaseModel):
     sl_rebuy_delay_hours: float = 1.0
 
 
+# ---- Email Notifications ----
+
+class EmailConfigUpdate(BaseModel):
+    enabled: bool | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = Field(None, ge=1, le=65535)
+    username: str | None = None
+    password: str | None = None  # raw password — encrypted server-side
+    from_address: str | None = None
+    to_address: str | None = None
+    use_tls: bool | None = None
+
+
+class EmailConfigResponse(BaseModel):
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    username: str = ""
+    password: str = ""  # masked as "••••••" when set
+    from_address: str = ""
+    to_address: str = ""
+    use_tls: bool = True
+
+
 # ---- Exchange ----
 
 class ExchangeAddRequest(BaseModel):

@@ -216,42 +216,27 @@ export interface IndicatorData {
   timestamp: string;
 }
 
-export interface BacktestRequest {
-  symbol: string;
-  initial_capital: number;
-  num_candles: number;
-  timeframe: string;
-  entry_threshold: number;
-  exit_threshold: number;
+
+export interface EmailConfig {
+  enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  username: string;
+  password: string;  // masked as "••••••" when set
+  from_address: string;
+  to_address: string;
+  use_tls: boolean;
 }
 
-export interface BacktestTrade {
-  pair_symbol: string;
-  side: string;
-  entry_price: number;
-  exit_price: number;
-  quantity: number;
-  pnl: number;
-  pnl_pct: number;
-  entry_time: string;
-  exit_time: string;
-}
-
-export interface BacktestResult {
-  id: string;
-  symbol: string;
-  initial_capital: number;
-  final_value: number;
-  total_return_pct: number;
-  total_trades: number;
-  winning_trades: number;
-  losing_trades: number;
-  win_rate: number;
-  max_drawdown_pct: number;
-  sharpe_ratio: number;
-  equity_curve: { timestamp: string; value: number }[];
-  trade_log: BacktestTrade[];
-  created_at: string;
+export interface EmailConfigUpdate {
+  enabled?: boolean;
+  smtp_host?: string;
+  smtp_port?: number;
+  username?: string;
+  password?: string;
+  from_address?: string;
+  to_address?: string;
+  use_tls?: boolean;
 }
 
 export interface AlertConfig {

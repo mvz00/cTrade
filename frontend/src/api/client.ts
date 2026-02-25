@@ -26,8 +26,8 @@ import type {
   ActivityEntry,
   Signal,
   IndicatorData,
-  BacktestRequest,
-  BacktestResult,
+  EmailConfig,
+  EmailConfigUpdate,
   AlertConfig,
   CreateAlertRequest,
   AlertHistory,
@@ -120,6 +120,9 @@ export const api = {
     apiFetch<StrategyConfig>('/config/strategy', { method: 'PUT', body: JSON.stringify(body) }),
   updateRisk: (body: RiskConfigUpdate) =>
     apiFetch<RiskConfig>('/config/risk', { method: 'PUT', body: JSON.stringify(body) }),
+  emailConfig: () => apiFetch<EmailConfig>('/config/email'),
+  updateEmailConfig: (body: EmailConfigUpdate) =>
+    apiFetch<EmailConfig>('/config/email', { method: 'PUT', body: JSON.stringify(body) }),
 
   listExchanges: () => apiFetch<ExchangeInfo[]>('/exchanges/'),
   availableExchanges: () => apiFetch<AvailableExchange[]>('/exchanges/available'),
@@ -177,9 +180,6 @@ export const api = {
   latestSignal: (symbol: string) => apiFetch<Signal | null>(`/signals/${encodeURIComponent(symbol)}/latest`),
   indicators: (symbol: string) => apiFetch<IndicatorData | null>(`/signals/${encodeURIComponent(symbol)}/indicators`),
 
-  runBacktest: (body: BacktestRequest) =>
-    apiFetch<BacktestResult>('/backtest/run', { method: 'POST', body: JSON.stringify(body) }),
-  backtestResults: () => apiFetch<BacktestResult[]>('/backtest/results'),
 
   listAlerts: () => apiFetch<AlertConfig[]>('/alerts/'),
   createAlert: (body: CreateAlertRequest) =>

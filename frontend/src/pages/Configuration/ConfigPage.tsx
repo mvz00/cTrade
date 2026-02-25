@@ -3,6 +3,7 @@ import { TradingModeCard } from './TradingModeCard';
 import { StrategyForm } from './StrategyForm';
 import { RiskForm } from './RiskForm';
 import { ExchangeSection } from './ExchangeSection';
+import { EmailNotificationCard } from './EmailNotificationCard';
 
 export function ConfigPage() {
   return (
@@ -17,6 +18,7 @@ export function ConfigPage() {
         <StrategyForm />
         <RiskForm />
         <ExchangeSection />
+        <EmailNotificationCard />
       </div>
     </div>
   );

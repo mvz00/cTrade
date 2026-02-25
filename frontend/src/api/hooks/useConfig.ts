@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
-import type { TradingModeUpdate, StrategyConfigUpdate, RiskConfigUpdate } from '../types';
+import type { TradingModeUpdate, StrategyConfigUpdate, RiskConfigUpdate, EmailConfigUpdate } from '../types';
 
 export function useTradingMode() {
   return useQuery({
@@ -57,6 +57,24 @@ export function useUpdateRisk() {
     mutationFn: (body: RiskConfigUpdate) => api.updateRisk(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['config', 'risk'] });
+    },
+  });
+}
+
+export function useEmailConfig() {
+  return useQuery({
+    queryKey: ['config', 'email'],
+    queryFn: api.emailConfig,
+    refetchInterval: REFETCH_INTERVALS.CONFIG,
+  });
+}
+
+export function useUpdateEmailConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: EmailConfigUpdate) => api.updateEmailConfig(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['config', 'email'] });
     },
   });
 }

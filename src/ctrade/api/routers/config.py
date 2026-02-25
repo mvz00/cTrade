@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ctrade.api.schemas.config import (
+    EmailConfigResponse,
+    EmailConfigUpdate,
     RiskConfigResponse,
     RiskConfigUpdate,
     StrategyConfigResponse,
@@ -108,3 +110,33 @@ async def update_risk_config(body: RiskConfigUpdate) -> RiskConfigResponse:
     """Update risk management parameters."""
     updated = _store().update_risk(body.model_dump(exclude_none=True))
     return RiskConfigResponse(**updated)
+
+
+# ---- Email Notifications ----
+
+@router.get("/email", response_model=EmailConfigResponse)
+async def get_email_config() -> EmailConfigResponse:
+    """Get email notification settings (password masked)."""
+    config = _store().get_email()
+    # Mask password — never expose the encrypted blob to the frontend
+    has_password = bool(config.get("password_encrypted"))
+    safe = {k: v for k, v in config.items() if k != "password_encrypted"}
+    safe["password"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_password else ""
+    return EmailConfigResponse(**safe)
+
+
+@router.put("/email", response_model=EmailConfigResponse)
+async def update_email_config(body: EmailConfigUpdate) -> EmailConfigResponse:
+    """Update email notification settings.
+
+    If password is ``"••••••"`` (the masked placeholder), the existing
+    encrypted password is preserved.  Send a new plaintext value to change it.
+    """
+    updates = body.model_dump(exclude_none=True)
+    updated = _store().update_email(updates)
+
+    # Return masked response
+    has_password = bool(updated.get("password_encrypted"))
+    safe = {k: v for k, v in updated.items() if k != "password_encrypted"}
+    safe["password"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_password else ""
+    return EmailConfigResponse(**safe)

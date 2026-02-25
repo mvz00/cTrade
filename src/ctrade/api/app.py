@@ -18,7 +18,7 @@ from ctrade.api.middleware import setup_middleware
 from ctrade.api.routers import (
     alerts,
     auth,
-    backtest,
+
     config,
     connections,
     dashboard,
@@ -180,7 +180,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(exchanges.router, prefix="/api/v1")
     app.include_router(trading.router, prefix="/api/v1")
     app.include_router(signals.router, prefix="/api/v1")
-    app.include_router(backtest.router, prefix="/api/v1")
+
     app.include_router(alerts.router, prefix="/api/v1")
     app.include_router(screener.router, prefix="/api/v1")
     app.include_router(sentiment.router, prefix="/api/v1")

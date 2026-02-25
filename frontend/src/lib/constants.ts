@@ -7,7 +7,6 @@ export const ROUTES = {
   SIGNALS: '/signals',
   INTELLIGENCE: '/intelligence',
   SCREENER: '/screener',
-  BACKTESTING: '/backtesting',
   ALERTS: '/alerts',
   ACCOUNT: '/account',
 } as const;
