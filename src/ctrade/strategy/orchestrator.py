@@ -33,7 +33,6 @@ from ctrade.strategy.signal_manager import SignalManager
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PAIRS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
 _MAX_ACTIVITY_LOG = 100
 
 
@@ -176,6 +175,12 @@ class TradingOrchestrator:
         """Return recent activity log entries (newest first)."""
         return list(reversed(self._activity_log[-limit:]))
 
+    def clear_activity_log(self) -> int:
+        """Clear all activity log entries. Returns the count cleared."""
+        count = len(self._activity_log)
+        self._activity_log.clear()
+        return count
+
     def _log_activity(
         self,
         activity_type: str,
@@ -284,17 +289,6 @@ class TradingOrchestrator:
         if interval:
             self._interval_seconds = interval
         self._running = True
-
-        # Auto-add default pairs if none are watched
-        engine = PaperEngine.get_instance()
-        if not engine.get_watched_pairs():
-            for pair in _DEFAULT_PAIRS:
-                engine.add_watched_pair(pair)
-            logger.info("Auto-added %d default trading pairs", len(_DEFAULT_PAIRS))
-            self._log_activity(
-                "info", "ALL",
-                f"Auto-added {len(_DEFAULT_PAIRS)} default pairs: {', '.join(_DEFAULT_PAIRS)}",
-            )
 
         self._task = asyncio.create_task(self._run_loop())
         logger.info("Trading orchestrator started (interval=%ds)", self._interval_seconds)

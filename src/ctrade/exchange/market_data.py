@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Top ~50 coins with approximate USD prices for seed/simulation data.
 # Used to dynamically generate trading pairs for any quote currency.
 _TOP_COINS: dict[str, float] = {
+    # Major caps
     "BTC": 67000.0, "ETH": 3500.0, "SOL": 145.0, "BNB": 580.0,
     "XRP": 0.62, "ADA": 0.45, "DOGE": 0.082, "DOT": 7.20,
     "AVAX": 35.0, "LINK": 14.50, "MATIC": 0.58, "UNI": 9.80,
@@ -38,6 +39,20 @@ _TOP_COINS: dict[str, float] = {
     "XLM": 0.11, "ICP": 12.0, "TRX": 0.12, "EOS": 0.78,
     "FLOW": 0.72, "CHZ": 0.068, "IMX": 1.80, "GALA": 0.028,
     "1INCH": 0.35, "SUSHI": 1.10, "COMP": 52.0,
+    # Extended coverage for exchanges with 100+ pairs (e.g. CoinSpot BTC)
+    "TON": 5.80, "EGLD": 38.0, "KAS": 0.12, "CELO": 0.65,
+    "ROSE": 0.10, "MINA": 0.75, "KAVA": 0.68, "ZIL": 0.022,
+    "ONE": 0.015, "IOTA": 0.22, "XTZ": 0.85, "NEO": 11.0,
+    "QTUM": 3.20, "SNX": 2.50, "BAL": 3.80, "YFI": 6800.0,
+    "LDO": 1.60, "DYDX": 1.40, "RPL": 22.0, "PENDLE": 4.50,
+    "CAKE": 2.50, "ENJ": 0.28, "APE": 1.10, "CRO": 0.088,
+    "KCS": 8.50, "STORJ": 0.55, "AR": 22.0, "LPT": 15.0,
+    "ANKR": 0.028, "OCEAN": 0.40, "JASMY": 0.018, "FLOKI": 0.00015,
+    "BONK": 0.000018, "ONDO": 0.85, "WLD": 2.20, "STX": 1.60,
+    "CFX": 0.18, "RSR": 0.005, "ZRX": 0.38, "BAT": 0.22,
+    "ENS": 15.0, "SKL": 0.040, "COTI": 0.065, "CELR": 0.018,
+    "HOT": 0.0018, "DENT": 0.0012, "ACH": 0.022, "RLC": 1.80,
+    "WAVES": 1.60, "JUP": 0.70,
 }
 
 # Approximate USD → quote currency conversion rates.

@@ -152,6 +152,13 @@ class PaperEngine:
                 return True
             return False
 
+    def clear_all_watched_pairs(self) -> int:
+        """Remove all watched pairs. Returns the count removed."""
+        with self._data_lock:
+            count = len(self._watched_pairs)
+            self._watched_pairs.clear()
+            return count
+
     # ---- Order management ----
 
     async def place_order(

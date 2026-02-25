@@ -35,6 +35,14 @@ export function useRemovePair() {
   });
 }
 
+export function useRemoveAllPairs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.removeAllPairs(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['trading', 'pairs'] }),
+  });
+}
+
 export function useOrders(status?: string) {
   return useQuery({
     queryKey: ['trading', 'orders', status],
@@ -152,5 +160,13 @@ export function useActivityLog() {
     queryKey: ['trading', 'activity'],
     queryFn: api.activityLog,
     refetchInterval: REFETCH_INTERVALS.TRADING,
+  });
+}
+
+export function useClearActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.clearActivity(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['trading', 'activity'] }),
   });
 }

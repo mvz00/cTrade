@@ -140,6 +140,8 @@ export const api = {
     apiFetch<TradingPair[]>('/trading/pairs/batch', { method: 'POST', body: JSON.stringify({ symbols }) }),
   removePair: (symbol: string) =>
     apiFetch<void>(`/trading/pairs/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
+  removeAllPairs: () =>
+    apiFetch<{ removed: number }>('/trading/pairs', { method: 'DELETE' }),
   listOrders: (status?: string) =>
     apiFetch<Order[]>(`/trading/orders${status ? `?status=${status}` : ''}`),
   placeOrder: (body: PlaceOrderRequest) =>
@@ -156,6 +158,7 @@ export const api = {
   getTicker: (symbol: string) =>
     apiFetch<Ticker>(`/trading/ticker/${encodeURIComponent(symbol)}`),
   activityLog: () => apiFetch<ActivityEntry[]>('/trading/activity'),
+  clearActivity: () => apiFetch<{ cleared: number }>('/trading/activity/clear', { method: 'POST' }),
   engineStatus: () => apiFetch<EngineStatus>('/trading/engine/status'),
   startEngine: (interval?: number) =>
     apiFetch<EngineStatus>('/trading/engine/start', { method: 'POST', body: interval ? JSON.stringify({ interval }) : '{}' }),
