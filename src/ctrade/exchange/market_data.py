@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import math
 import random
@@ -785,6 +786,202 @@ class MarketDataProvider:
         except Exception as e:
             logger.warning("CoinSpot native API failed: %s", e)
             return None
+
+    @staticmethod
+    async def _coinspot_v2_request(
+        api_key: str,
+        api_secret: str,
+        endpoint: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send a signed POST to a CoinSpot V2 API endpoint.
+
+        Uses the same HMAC-SHA512 signing pattern as
+        ``_fetch_coinspot_balance_native`` but with ``json.dumps`` for
+        complex payloads (orders with strings, floats, etc.).
+        """
+        import aiohttp
+
+        url = f"https://www.coinspot.com.au{endpoint}"
+
+        if payload is None:
+            payload = {}
+        payload["nonce"] = int(time.time() * 1000)
+
+        body = json.dumps(payload, separators=(",", ":"))
+        sign = hmac.new(
+            api_secret.encode("utf-8"),
+            body.encode("utf-8"),
+            hashlib.sha512,
+        ).hexdigest()
+
+        headers = {
+            "Content-Type": "application/json",
+            "key": api_key,
+            "sign": sign,
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                data=body,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    raise RuntimeError(
+                        f"CoinSpot V2 HTTP {resp.status}: {data}"
+                    )
+                return data
+
+    @staticmethod
+    async def _coinspot_place_order_native(
+        api_key: str,
+        api_secret: str,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+    ) -> dict[str, Any]:
+        """Place an order on CoinSpot via native V2 API.
+
+        Routes to the correct endpoint based on quote currency:
+
+        - **AUD/USDT pairs** → ``POST /api/v2/my/{buy|sell}`` with
+          ``markettype`` param (``"aud"`` or ``"usdt"``).
+        - **BTC/crypto pairs** → ``POST /api/v2/my/swap/now`` for
+          coin-to-coin swap.
+
+        Swap semantics:
+        - BUY ADA/BTC  = sell BTC to buy ADA, amount = qty × price (BTC)
+        - SELL ADA/BTC = sell ADA to get BTC, amount = qty (ADA)
+
+        Returns a ccxt-compatible order dict so ``live_engine.py`` result
+        parsing works unchanged.
+        """
+        parts = symbol.split("/")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid symbol format: {symbol}")
+        base, quote = parts[0].upper(), parts[1].upper()
+
+        if quote in ("AUD", "USDT"):
+            # Standard buy/sell endpoint
+            endpoint = f"/api/v2/my/{'buy' if side == 'buy' else 'sell'}"
+            payload: dict[str, Any] = {
+                "cointype": base,
+                "amount": quantity,
+                "rate": price,
+                "markettype": quote.lower(),
+            }
+            logger.info(
+                "CoinSpot V2 %s: %s qty=%.6f rate=%.8f markettype=%s",
+                "buy" if side == "buy" else "sell",
+                base, quantity, price, quote.lower(),
+            )
+
+            data = await MarketDataProvider._coinspot_v2_request(
+                api_key, api_secret, endpoint, payload,
+            )
+
+        elif quote == "BTC":
+            # Swap endpoint for crypto-to-crypto via BTC
+            endpoint = "/api/v2/my/swap/now"
+
+            if side == "buy":
+                # BUY ADA/BTC = sell BTC to buy ADA
+                # amount = total BTC to spend = qty × price
+                swap_amount = round(quantity * price, 8)
+                payload = {
+                    "cointypesell": "BTC",
+                    "cointypebuy": base,
+                    "amount": swap_amount,
+                }
+                logger.info(
+                    "CoinSpot V2 swap (buy %s): sell %.8f BTC → buy %s",
+                    base, swap_amount, base,
+                )
+            else:
+                # SELL ADA/BTC = sell ADA to get BTC
+                # amount = quantity of base coin to sell
+                payload = {
+                    "cointypesell": base,
+                    "cointypebuy": "BTC",
+                    "amount": quantity,
+                }
+                logger.info(
+                    "CoinSpot V2 swap (sell %s): sell %.6f %s → buy BTC",
+                    base, quantity, base,
+                )
+
+            data = await MarketDataProvider._coinspot_v2_request(
+                api_key, api_secret, endpoint, payload,
+            )
+
+        else:
+            raise ValueError(
+                f"Unsupported CoinSpot quote currency: {quote}. "
+                f"Supported: AUD, USDT, BTC"
+            )
+
+        # Validate response
+        if data.get("status") != "ok":
+            raise RuntimeError(
+                f"CoinSpot V2 API error: {data.get('message', 'unknown error')}"
+            )
+
+        logger.info("CoinSpot V2 order OK: %s", data)
+
+        # Return ccxt-compatible dict.
+        # Note: CoinSpot V2 responses are minimal ({status: "ok"}) —
+        # they don't return order IDs or fill details.
+        return {
+            "id": data.get("id"),
+            "status": "ok",
+            "filled": quantity,
+            "average": price,
+            "price": price,
+            "fee": {"cost": 0, "currency": quote},
+            "info": data,
+        }
+
+    @staticmethod
+    async def _get_coinspot_credentials(
+        exchange_id: str | None = None,
+    ) -> tuple[str, str]:
+        """Decrypt CoinSpot API key and secret from the vault.
+
+        Same decryption pattern as the native balance fallback.
+        Returns ``(api_key, api_secret)`` tuple.
+        """
+        from ctrade.core.config_store import RuntimeConfigStore
+        from ctrade.security.vault import Vault
+        from ctrade.settings import get_settings
+
+        store = RuntimeConfigStore.get()
+
+        if exchange_id:
+            entry = store.get_exchange_entry(exchange_id)
+        else:
+            # Find first CoinSpot exchange
+            entry = None
+            for ex in store.list_exchanges():
+                e = store.get_exchange_entry(ex["id"])
+                if e and e.name.lower() == "coinspot":
+                    entry = e
+                    break
+
+        if not entry:
+            raise ValueError("CoinSpot exchange entry not found")
+
+        settings = get_settings()
+        key = settings.encryption_key.get_secret_value()
+        vault = Vault(key)
+
+        api_key = vault.decrypt(entry.api_key_encrypted)
+        api_secret = vault.decrypt(entry.api_secret_encrypted)
+
+        return api_key, api_secret
 
     async def fetch_exchange_balance(self) -> dict[str, float] | None:
         """Fetch real account balances from ALL configured exchanges.
