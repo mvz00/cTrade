@@ -8,10 +8,10 @@ import { NumberInput } from '@/components/ui/NumberInput';
 import { useToast } from '@/components/ui/Toast';
 import { useTradingMode, useRiskConfig, useUpdateTradingMode, useUpdateRisk } from '@/api/hooks/useConfig';
 import {
-  usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair,
+  usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair, useRemoveAllPairs,
   usePositions, useClosePosition, useCloseAllPositions,
   usePortfolio, useEngineStatus, useStartEngine, useStopEngine,
-  useResetPaperEngine, useQuickBuy, useActivityLog,
+  useResetPaperEngine, useQuickBuy, useActivityLog, useClearActivity, useTicker,
 } from '@/api/hooks/useTrading';
 import { formatUSD, formatAUD, formatNumber, formatTime } from '@/lib/formatters';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,7 +19,7 @@ import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
   Play, Square, Plus, X, Zap, Activity, Search,
   TrendingUp, TrendingDown, DollarSign, ShieldAlert,
-  Download, ChevronDown, ChevronUp, History, RotateCcw, ShoppingCart,
+  Download, ChevronDown, ChevronUp, History, RotateCcw, ShoppingCart, Trash2,
 } from 'lucide-react';
 
 const USDT_TO_AUD = 1.55;
@@ -99,7 +99,12 @@ export function TradingPage() {
   const [pairSearch, setPairSearch] = useState('');
   const [selectedNewPairs, setSelectedNewPairs] = useState<Set<string>>(new Set());
   const [showPairPicker, setShowPairPicker] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+
+  // Manual trade state
+  const [manualPairSearch, setManualPairSearch] = useState('');
+  const [manualSelectedPair, setManualSelectedPair] = useState<string | null>(null);
+  const [manualAmount, setManualAmount] = useState<number | null>(null);
+  const [showManualDropdown, setShowManualDropdown] = useState(false);
 
   // Auto-trading form state
   const [maxBuy, setMaxBuy] = useState<number | null>(null);
@@ -118,16 +123,19 @@ export function TradingPage() {
   const { data: portfolio, isLoading } = usePortfolio();
   const { data: engine } = useEngineStatus();
   const { data: activityData } = useActivityLog();
+  const { data: manualTicker } = useTicker(manualSelectedPair || '');
 
   // --- Mutations ---
   const addPairsBatch = useAddPairsBatch();
   const removePair = useRemovePair();
+  const removeAllPairs = useRemoveAllPairs();
   const closePos = useClosePosition();
   const closeAllPos = useCloseAllPositions();
   const startEngine = useStartEngine();
   const stopEngine = useStopEngine();
   const resetPaper = useResetPaperEngine();
   const quickBuy = useQuickBuy();
+  const clearActivity = useClearActivity();
   const updateTrading = useUpdateTradingMode();
   const updateRisk = useUpdateRisk();
   const { toast } = useToast();
@@ -148,6 +156,11 @@ export function TradingPage() {
 
   const isRunning = engine?.running ?? false;
   const isLive = mode?.mode === 'live';
+
+  // Manual trade pair search (min 2 chars)
+  const manualFilteredPairs = manualPairSearch.length >= 2
+    ? (availPairs || []).filter(p => p.toLowerCase().includes(manualPairSearch.toLowerCase())).slice(0, 20)
+    : [];
 
   // --- Handlers ---
   async function handleStartAutoTrading() {
@@ -197,10 +210,8 @@ export function TradingPage() {
     setSelectedNewPairs(prev => {
       const next = new Set(prev);
       if (allVisibleSelected) {
-        // Deselect all visible
         for (const p of visiblePairs) next.delete(p);
       } else {
-        // Select all visible
         for (const p of visiblePairs) next.add(p);
       }
       return next;
@@ -241,6 +252,28 @@ export function TradingPage() {
     });
   }
 
+  function handleManualBuy() {
+    if (!manualSelectedPair) return;
+    const amount = manualAmount || effectiveMaxBuy;
+    if (!window.confirm(`Buy ${manualSelectedPair} for $${amount} USDT?`)) return;
+    quickBuy.mutate(
+      { symbol: manualSelectedPair, amount_usdt: amount },
+      {
+        onSuccess: (data) => {
+          if (data.success) {
+            toast(`Bought ${data.quantity.toFixed(6)} ${manualSelectedPair} @ $${data.price.toFixed(2)}`, 'success');
+            setManualSelectedPair(null);
+            setManualPairSearch('');
+            setManualAmount(null);
+          } else {
+            toast(data.error || 'Buy failed', 'error');
+          }
+        },
+        onError: (e: any) => toast(e.message, 'error'),
+      },
+    );
+  }
+
   return (
     <div>
       <PageHeader
@@ -266,9 +299,23 @@ export function TradingPage() {
               </span>
             )}
           </div>
-          {isRunning && (
-            <span className="text-xs text-ct-text-dim">Tick #{engine?.tick_count ?? 0}</span>
-          )}
+          <div className="flex items-center gap-3">
+            {isRunning && (
+              <span className="text-xs text-ct-text-dim">Tick #{engine?.tick_count ?? 0}</span>
+            )}
+            {activityData && activityData.length > 0 && (
+              <button
+                onClick={() => clearActivity.mutate(undefined, {
+                  onSuccess: (data) => toast(`Cleared ${data.cleared} entries`, 'success'),
+                  onError: (e) => toast(e.message, 'error'),
+                })}
+                disabled={clearActivity.isPending}
+                className="text-xs text-ct-text-dim hover:text-ct-red flex items-center gap-1"
+              >
+                <Trash2 size={10} /> Clear
+              </button>
+            )}
+          </div>
         </div>
         {(!activityData || activityData.length === 0) ? (
           <p className="text-sm text-ct-text-dim py-3 text-center">
@@ -476,27 +523,217 @@ export function TradingPage() {
         </Card>
       </div>
 
-      {/* ── Watched Pairs (compact) + Open Positions ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-6">
-        {/* Watched Pairs — compact inline chips + multi-select picker */}
+      {/* ── Open Positions (full width) ── */}
+      <Card className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">
+            Open Positions ({(positions || []).length})
+          </h3>
+          {(positions || []).length > 0 && (
+            <Button
+              variant="danger"
+              onClick={() => closeAllPos.mutate(undefined, {
+                onSuccess: (data) => {
+                  const msg = data.failed > 0
+                    ? `Closed ${data.closed}, ${data.failed} failed`
+                    : `Closed ${data.closed} positions`;
+                  toast(msg, data.failed > 0 ? 'error' : 'success');
+                },
+                onError: (e) => toast(e.message, 'error'),
+              })}
+              disabled={closeAllPos.isPending}
+            >
+              <X size={12} /> Close All
+            </Button>
+          )}
+        </div>
+        {(positions || []).length === 0 ? (
+          <p className="text-sm text-ct-text-dim py-8 text-center">No open positions</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-ct-border text-ct-text-muted text-left">
+                  <th className="pb-2">Pair</th>
+                  <th className="pb-2">Exchange</th>
+                  <th className="pb-2">Side</th>
+                  <th className="pb-2">Qty</th>
+                  <th className="pb-2">Entry</th>
+                  <th className="pb-2">Investment</th>
+                  <th className="pb-2">SL / TP</th>
+                  <th className="pb-2">P&L</th>
+                  <th className="pb-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(positions || []).map(p => (
+                  <Fragment key={p.id}>
+                    <tr className="border-b border-ct-border/50">
+                      <td className="py-2 font-mono">{p.pair_symbol}</td>
+                      <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
+                      <td>
+                        <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
+                      </td>
+                      <td>{formatNumber(p.quantity, 6)}</td>
+                      <td>{formatUSD(p.entry_price)}</td>
+                      <td>{formatUSD(p.entry_price * p.quantity)}</td>
+                      <td className="text-xs text-ct-text-dim">
+                        {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
+                        {' / '}
+                        {p.take_profit ? formatUSD(p.take_profit) : '—'}
+                      </td>
+                      <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
+                        {formatUSD(p.unrealized_pnl ?? 0)}
+                        <span className="text-xs text-ct-text-dim ml-1">
+                          ({(p.unrealized_pnl_pct ?? 0).toFixed(2)}%)
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => closePos.mutate(p.id, {
+                            onSuccess: () => toast('Position closed', 'success'),
+                            onError: (e) => toast(e.message, 'error'),
+                          })}
+                          className="text-ct-text-dim hover:text-ct-red"
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                    {p.justification && (
+                      <tr>
+                        <td colSpan={9} className="pb-2 px-1">
+                          <p className="text-xs text-ct-text-dim italic leading-relaxed">
+                            {p.justification}
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* ── Watched Pairs (1/3) + Trade History (2/3) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Watched Pairs + Manual Trade */}
         <Card>
+          {/* Manual Trade */}
+          <div className="mb-4 pb-3 border-b border-ct-border">
+            <h4 className="text-xs font-medium text-ct-text-muted uppercase mb-2 flex items-center gap-1">
+              <ShoppingCart size={12} /> Manual Trade
+            </h4>
+
+            {/* Pair search input */}
+            <div className="relative mb-2">
+              <div className="flex items-center gap-2 bg-ct-bg rounded px-2 py-1.5 border border-ct-border">
+                <Search size={12} className="text-ct-text-dim" />
+                <input
+                  type="text"
+                  value={manualSelectedPair || manualPairSearch}
+                  onChange={e => {
+                    setManualPairSearch(e.target.value);
+                    setManualSelectedPair(null);
+                    setShowManualDropdown(true);
+                  }}
+                  onFocus={() => { if (!manualSelectedPair) setShowManualDropdown(true); }}
+                  placeholder="Search pair (e.g. BTC/USDT)"
+                  className="flex-1 bg-transparent text-xs text-ct-text outline-none placeholder:text-ct-text-dim"
+                />
+                {manualSelectedPair && (
+                  <button onClick={() => { setManualSelectedPair(null); setManualPairSearch(''); }}>
+                    <X size={10} className="text-ct-text-dim hover:text-ct-red" />
+                  </button>
+                )}
+              </div>
+
+              {/* Dropdown results */}
+              {showManualDropdown && manualFilteredPairs.length > 0 && !manualSelectedPair && (
+                <div className="absolute z-20 w-full mt-1 bg-ct-card border border-ct-border rounded shadow-lg max-h-36 overflow-y-auto">
+                  {manualFilteredPairs.map(p => (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        setManualSelectedPair(p);
+                        setManualPairSearch('');
+                        setShowManualDropdown(false);
+                      }}
+                      className="w-full text-left px-2 py-1 text-xs font-mono hover:bg-ct-bg-hover text-ct-text"
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Selected pair details + buy */}
+            {manualSelectedPair && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-ct-text-muted">Price:</span>
+                  <span className="font-mono text-ct-text">
+                    {manualTicker ? formatUSD(manualTicker.last_price) : 'Loading...'}
+                  </span>
+                </div>
+                <NumberInput
+                  label="Amount"
+                  value={manualAmount || effectiveMaxBuy}
+                  onChange={v => setManualAmount(v)}
+                  min={1}
+                  max={100000}
+                  step={10}
+                  suffix="USDT"
+                />
+                <Button
+                  onClick={handleManualBuy}
+                  disabled={quickBuy.isPending || !manualTicker}
+                  className="w-full"
+                >
+                  <ShoppingCart size={12} /> Buy {manualSelectedPair.split('/')[0]}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Watched Pairs */}
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">
               Watched ({(pairs || []).length})
             </h3>
-            <button
-              onClick={() => setShowPairPicker(!showPairPicker)}
-              className="text-ct-accent hover:text-ct-accent/80 text-xs flex items-center gap-1"
-            >
-              <Plus size={12} /> Add
-              {showPairPicker ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
+            <div className="flex items-center gap-2">
+              {(pairs || []).length > 0 && (
+                <button
+                  onClick={() => {
+                    if (window.confirm('Remove all watched pairs?')) {
+                      removeAllPairs.mutate(undefined, {
+                        onSuccess: (data) => toast(`Removed ${data.removed} pairs`, 'success'),
+                        onError: (e) => toast(e.message, 'error'),
+                      });
+                    }
+                  }}
+                  className="text-ct-red hover:text-ct-red/80 text-xs flex items-center gap-1"
+                >
+                  <Trash2 size={10} /> Clear
+                </button>
+              )}
+              <button
+                onClick={() => setShowPairPicker(!showPairPicker)}
+                className="text-ct-accent hover:text-ct-accent/80 text-xs flex items-center gap-1"
+              >
+                <Plus size={12} /> Add
+                {showPairPicker ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+            </div>
           </div>
 
           {/* Current pairs as compact chips */}
           <div className="flex flex-wrap gap-1.5 mb-3">
             {(pairs || []).length === 0 && (
-              <p className="text-xs text-ct-text-dim">Auto-populated on start</p>
+              <p className="text-xs text-ct-text-dim">No pairs watched — add pairs to start trading</p>
             )}
             {(pairs || []).map(p => (
               <span key={p.symbol} className="inline-flex items-center gap-1 bg-ct-bg-hover rounded px-2 py-0.5 text-xs font-mono text-ct-text">
@@ -574,93 +811,61 @@ export function TradingPage() {
           )}
         </Card>
 
-        {/* Open Positions */}
-        <Card className="lg:col-span-3">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">
-              Open Positions ({(positions || []).length})
-            </h3>
-            {(positions || []).length > 0 && (
-              <Button
-                variant="danger"
-                onClick={() => closeAllPos.mutate(undefined, {
-                  onSuccess: (data) => {
-                    const msg = data.failed > 0
-                      ? `Closed ${data.closed}, ${data.failed} failed`
-                      : `Closed ${data.closed} positions`;
-                    toast(msg, data.failed > 0 ? 'error' : 'success');
-                  },
-                  onError: (e) => toast(e.message, 'error'),
-                })}
-                disabled={closeAllPos.isPending}
+        {/* Trade History (always visible, 2/3 width) */}
+        <Card className="lg:col-span-2">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-ct-text-muted uppercase tracking-wider">
+              <History size={14} />
+              Trade History ({(closedPositions || []).length})
+            </div>
+            {(closedPositions || []).length > 0 && (
+              <button
+                onClick={handleDownloadCSV}
+                className="flex items-center gap-1 text-xs text-ct-accent hover:text-ct-accent/80"
               >
-                <X size={12} /> Close All
-              </Button>
+                <Download size={12} /> Export CSV
+              </button>
             )}
           </div>
-          {(positions || []).length === 0 ? (
-            <p className="text-sm text-ct-text-dim py-8 text-center">No open positions</p>
+          {(closedPositions || []).length === 0 ? (
+            <p className="text-sm text-ct-text-dim py-4 text-center">No closed trades</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-72 overflow-y-auto">
               <table className="w-full text-sm">
-                <thead>
+                <thead className="sticky top-0 bg-ct-card">
                   <tr className="border-b border-ct-border text-ct-text-muted text-left">
                     <th className="pb-2">Pair</th>
                     <th className="pb-2">Exchange</th>
                     <th className="pb-2">Side</th>
-                    <th className="pb-2">Qty</th>
                     <th className="pb-2">Entry</th>
-                    <th className="pb-2">Investment</th>
-                    <th className="pb-2">SL / TP</th>
+                    <th className="pb-2">Exit</th>
+                    <th className="pb-2">Qty</th>
                     <th className="pb-2">P&L</th>
-                    <th className="pb-2"></th>
+                    <th className="pb-2">P&L %</th>
+                    <th className="pb-2">Closed</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(positions || []).map(p => (
-                    <Fragment key={p.id}>
-                      <tr className="border-b border-ct-border/50">
-                        <td className="py-2 font-mono">{p.pair_symbol}</td>
-                        <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
-                        <td>
-                          <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
-                        </td>
-                        <td>{formatNumber(p.quantity, 6)}</td>
-                        <td>{formatUSD(p.entry_price)}</td>
-                        <td>{formatUSD(p.entry_price * p.quantity)}</td>
-                        <td className="text-xs text-ct-text-dim">
-                          {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
-                          {' / '}
-                          {p.take_profit ? formatUSD(p.take_profit) : '—'}
-                        </td>
-                        <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                          {formatUSD(p.unrealized_pnl ?? 0)}
-                          <span className="text-xs text-ct-text-dim ml-1">
-                            ({(p.unrealized_pnl_pct ?? 0).toFixed(2)}%)
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            onClick={() => closePos.mutate(p.id, {
-                              onSuccess: () => toast('Position closed', 'success'),
-                              onError: (e) => toast(e.message, 'error'),
-                            })}
-                            className="text-ct-text-dim hover:text-ct-red"
-                          >
-                            <X size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                      {p.justification && (
-                        <tr>
-                          <td colSpan={9} className="pb-2 px-1">
-                            <p className="text-xs text-ct-text-dim italic leading-relaxed">
-                              {p.justification}
-                            </p>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
+                  {(closedPositions || []).map(p => (
+                    <tr key={p.id} className="border-b border-ct-border/50">
+                      <td className="py-1.5 font-mono">{p.pair_symbol}</td>
+                      <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
+                      <td>
+                        <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
+                      </td>
+                      <td>{formatUSD(p.entry_price)}</td>
+                      <td>{p.exit_price ? formatUSD(p.exit_price) : '—'}</td>
+                      <td>{formatNumber(p.quantity, 6)}</td>
+                      <td className={(p.realized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
+                        {formatUSD(p.realized_pnl ?? 0)}
+                      </td>
+                      <td className={(p.realized_pnl_pct ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
+                        {(p.realized_pnl_pct ?? 0).toFixed(2)}%
+                      </td>
+                      <td className="text-xs text-ct-text-dim">
+                        {p.closed_at ? formatTime(p.closed_at) : '—'}
+                      </td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -668,76 +873,6 @@ export function TradingPage() {
           )}
         </Card>
       </div>
-
-      {/* ── Trade History (collapsible + download) ── */}
-      <Card>
-        <div className="flex items-center justify-between mb-2">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className="flex items-center gap-2 text-sm font-medium text-ct-text-muted uppercase tracking-wider hover:text-ct-text"
-          >
-            <History size={14} />
-            Trade History ({(closedPositions || []).length})
-            {showHistory ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-          {(closedPositions || []).length > 0 && (
-            <button
-              onClick={handleDownloadCSV}
-              className="flex items-center gap-1 text-xs text-ct-accent hover:text-ct-accent/80"
-            >
-              <Download size={12} /> Export CSV
-            </button>
-          )}
-        </div>
-        {showHistory && (
-          <>
-            {(closedPositions || []).length === 0 ? (
-              <p className="text-sm text-ct-text-dim py-4 text-center">No closed trades</p>
-            ) : (
-              <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-ct-card">
-                    <tr className="border-b border-ct-border text-ct-text-muted text-left">
-                      <th className="pb-2">Pair</th>
-                      <th className="pb-2">Exchange</th>
-                      <th className="pb-2">Side</th>
-                      <th className="pb-2">Entry</th>
-                      <th className="pb-2">Exit</th>
-                      <th className="pb-2">Qty</th>
-                      <th className="pb-2">P&L</th>
-                      <th className="pb-2">P&L %</th>
-                      <th className="pb-2">Closed</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(closedPositions || []).map(p => (
-                      <tr key={p.id} className="border-b border-ct-border/50">
-                        <td className="py-1.5 font-mono">{p.pair_symbol}</td>
-                        <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
-                        <td>
-                          <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
-                        </td>
-                        <td>{formatUSD(p.entry_price)}</td>
-                        <td>{p.exit_price ? formatUSD(p.exit_price) : '—'}</td>
-                        <td>{formatNumber(p.quantity, 6)}</td>
-                        <td className={(p.realized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                          {formatUSD(p.realized_pnl ?? 0)}
-                        </td>
-                        <td className={(p.realized_pnl_pct ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                          {(p.realized_pnl_pct ?? 0).toFixed(2)}%
-                        </td>
-                        <td className="text-xs text-ct-text-dim">
-                          {p.closed_at ? formatTime(p.closed_at) : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
-      </Card>
     </div>
   );
 }

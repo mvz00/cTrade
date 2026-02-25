@@ -69,6 +69,13 @@ async def remove_pair(symbol: str) -> None:
         raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
 
 
+@router.delete("/pairs", status_code=200)
+async def remove_all_pairs() -> dict[str, int]:
+    """Remove all watched pairs."""
+    engine = PaperEngine.get_instance()
+    return {"removed": engine.clear_all_watched_pairs()}
+
+
 # ---- Available Pairs ----
 
 @router.get("/available-pairs", response_model=list[str])
@@ -336,6 +343,13 @@ async def activity_log() -> list[ActivityEntry]:
     """Get recent activity log from the trading engine."""
     orch = TradingOrchestrator.get_instance()
     return [ActivityEntry(**e) for e in orch.get_activity_log()]
+
+
+@router.post("/activity/clear")
+async def clear_activity() -> dict[str, int]:
+    """Clear the activity log."""
+    orch = TradingOrchestrator.get_instance()
+    return {"cleared": orch.clear_activity_log()}
 
 
 # ---- Engine Control ----
