@@ -321,6 +321,58 @@ class MarketDataProvider:
 
             instance = exchange_class(config)
             await instance.load_markets()
+
+            # Extend ccxt markets with configured quote currencies.
+            # Some exchanges (e.g. CoinSpot) expose only a small subset
+            # of their markets via the ccxt API, but their order placement
+            # endpoints accept any valid coin/market pair.  Injecting
+            # synthetic market entries lets ccxt resolve symbols like
+            # ADA/BTC even when load_markets() didn't return them.
+            if entry and hasattr(instance, 'markets') and instance.markets:
+                existing_quotes = {m.get("quote") for m in instance.markets.values()}
+                missing_quotes = set(entry.quote_currencies) - existing_quotes
+                if missing_quotes:
+                    injected = 0
+                    for base in _TOP_COINS:
+                        for quote in missing_quotes:
+                            sym = f"{base}/{quote}"
+                            if sym not in instance.markets:
+                                instance.markets[sym] = {
+                                    "id": base.lower(),
+                                    "symbol": sym,
+                                    "base": base,
+                                    "quote": quote,
+                                    "baseId": base.lower(),
+                                    "quoteId": quote.lower(),
+                                    "type": "spot",
+                                    "spot": True,
+                                    "active": True,
+                                    "precision": {
+                                        "amount": None,
+                                        "price": None,
+                                        "cost": None,
+                                        "base": None,
+                                        "quote": None,
+                                    },
+                                    "limits": {
+                                        "leverage": {"min": None, "max": None},
+                                        "amount": {"min": None, "max": None},
+                                        "price": {"min": None, "max": None},
+                                        "cost": {"min": None, "max": None},
+                                    },
+                                    "info": {},
+                                }
+                                injected += 1
+                    if injected:
+                        logger.info(
+                            "Injected %d synthetic %s market(s) into %s "
+                            "(ccxt only returned %s quotes)",
+                            injected,
+                            ", ".join(sorted(missing_quotes)),
+                            entry.name,
+                            ", ".join(sorted(existing_quotes)),
+                        )
+
             return instance
         except Exception as e:
             logger.warning("Failed to create ccxt exchange (id=%s): %s", exchange_id, e)
