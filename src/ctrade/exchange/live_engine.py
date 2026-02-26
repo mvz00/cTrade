@@ -261,11 +261,21 @@ class LiveEngine:
                     with self._data_lock:
                         self._orders.append(order)
                     logger.warning("LIVE order rejected: %s", order.error_message)
+                    fire_and_forget(self._persist_order_async(order))
                     return order
             else:
                 logger.warning("Could not get real price for %s — skipping size check", symbol)
         except Exception as e:
-            logger.warning("Could not validate order size: %s", e)
+            # Fail-closed: reject order if size validation encounters an
+            # unexpected error.  For live trading we must not send unvalidated
+            # orders to the exchange.
+            order.status = OrderStatus.REJECTED
+            order.error_message = f"Order size validation failed: {e}"
+            with self._data_lock:
+                self._orders.append(order)
+            logger.error("LIVE order rejected — size validation error for %s: %s", symbol, e)
+            fire_and_forget(self._persist_order_async(order))
+            return order
 
         # Execute via ccxt
         ccxt_exchange = None
@@ -278,6 +288,7 @@ class LiveEngine:
                 order.error_message = "No exchange configured or connection failed"
                 with self._data_lock:
                     self._orders.append(order)
+                fire_and_forget(self._persist_order_async(order))
                 return order
 
             if ccxt_exchange.id == 'coinspot':
@@ -328,6 +339,7 @@ class LiveEngine:
                         self._orders.append(order)
                     await ccxt_exchange.close()
                     ccxt_exchange = None
+                    fire_and_forget(self._persist_order_async(order))
                     return order
 
                 order.order_type = OrderType.LIMIT
@@ -365,6 +377,7 @@ class LiveEngine:
                         symbol, exchange_name,
                     )
                     await ccxt_exchange.close()
+                    fire_and_forget(self._persist_order_async(order))
                     return order
 
                 # Auto-convert market → limit for exchanges that don't support market orders
@@ -404,6 +417,7 @@ class LiveEngine:
                         order.error_message = "Limit orders require a price"
                         with self._data_lock:
                             self._orders.append(order)
+                        fire_and_forget(self._persist_order_async(order))
                         return order
                     result = await ccxt_exchange.create_limit_order(
                         symbol, side, quantity, price
