@@ -835,6 +835,11 @@ class TradingOrchestrator:
         price = float(ticker.last_price)
         if price <= 0:
             return
+        # Position sizing: quantity = budget / price.
+        # For AUD pairs (e.g. BTC/AUD): budget is in AUD, price is in AUD,
+        # so quantity is correctly in base units despite the config field
+        # being named "max_order_usdt".  The naming reflects the original
+        # USDT-only design but the math is currency-agnostic.
         quantity = position_budget / price
 
         # Compute absolute SL/TP price levels

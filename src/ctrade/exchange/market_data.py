@@ -990,15 +990,21 @@ class MarketDataProvider:
         logger.info("CoinSpot V2 order OK: %s", data)
 
         # Return ccxt-compatible dict.
-        # Note: CoinSpot V2 responses are minimal ({status: "ok"}) —
-        # they don't return order IDs or fill details.
+        # CoinSpot V2 API limitations:
+        #   - Responses are minimal ({status: "ok"}) with no order IDs
+        #   - No fill details returned — we assume 100% fill at the
+        #     submitted price (V2 buy/sell endpoints are market-like).
+        #   - No fee info returned — we estimate 0.1% (CoinSpot's
+        #     standard trading fee) so PnL and email notifications
+        #     reflect a realistic cost.
+        estimated_fee = round(quantity * price * 0.001, 8)  # CoinSpot 0.1% fee
         return {
             "id": data.get("id"),
             "status": "ok",
             "filled": quantity,
             "average": price,
             "price": price,
-            "fee": {"cost": 0, "currency": quote},
+            "fee": {"cost": estimated_fee, "currency": quote},
             "info": data,
         }
 

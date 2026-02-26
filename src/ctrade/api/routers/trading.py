@@ -99,14 +99,42 @@ async def list_orders(
 
 @router.post("/orders", response_model=OrderResponse, status_code=201)
 async def place_order(body: PlaceOrderRequest) -> OrderResponse:
-    """Place a manual order."""
+    """Place a manual order.
+
+    Routes to the correct exchange based on the pair's quote currency,
+    mirroring the same logic used by quick-buy.
+    """
+    from ctrade.core.config_store import RuntimeConfigStore
+
     engine = get_engine()
+
+    # Route to correct exchange based on pair's quote currency
+    exchange_name = ""
+    exchange_id: str | None = None
+    try:
+        store = RuntimeConfigStore.get()
+        pair_entry = store.find_exchange_for_pair(body.symbol)
+        if pair_entry:
+            exchange_name = pair_entry.name
+            exchange_id = pair_entry.id
+        else:
+            exchanges = store.list_exchanges()
+            if exchanges:
+                ex_entry = store.get_exchange_entry(exchanges[0]["id"])
+                if ex_entry:
+                    exchange_name = ex_entry.name
+                    exchange_id = exchanges[0]["id"]
+    except RuntimeError:
+        pass  # config store not initialised — engine will use defaults
+
     order = await engine.place_order(
         symbol=body.symbol,
         side=body.side,
         order_type=body.order_type,
         quantity=body.quantity,
         price=body.price,
+        exchange_name=exchange_name,
+        exchange_id=exchange_id,
     )
     return OrderResponse(**engine._order_to_dict(order))
 
