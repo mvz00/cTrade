@@ -591,6 +591,31 @@ class LiveEngine:
             with self._data_lock:
                 self._close_position_internal(pos, order)
 
+        # Handle "Insufficient funds" — the coins don't exist on the
+        # exchange (e.g. position opened in paper mode, or coins sold
+        # externally).  Force-close the position in the database so it
+        # doesn't block future close-all attempts.
+        if (
+            order.status == OrderStatus.REJECTED
+            and pos.status == PositionStatus.OPEN
+            and order.error_message
+            and "insufficient funds" in order.error_message.lower()
+        ):
+            logger.warning(
+                "Force-closing position %s (%s) — exchange reported insufficient funds",
+                pos.id, pos.pair_symbol,
+            )
+            # Use last known price or entry price as exit price
+            fallback_price = Decimal(str(
+                self._live_prices.get(pos.pair_symbol, 0)
+            )) or pos.entry_price
+            order.avg_fill_price = fallback_price
+            order.filled_quantity = pos.quantity
+            order.status = OrderStatus.FILLED
+            order.filled_at = datetime.now(timezone.utc)
+            with self._data_lock:
+                self._close_position_internal(pos, order)
+
         return order
 
     async def refresh_live_prices(self) -> None:
