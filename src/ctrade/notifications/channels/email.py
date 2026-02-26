@@ -144,11 +144,48 @@ class EmailChannel:
                     f"{val}</td></tr>"
                 )
 
+        # Outlook indicator row (1h / 24h / 7d colored dots)
+        outlook_row = ""
+        o1h = meta.get("outlook_1h")
+        o24h = meta.get("outlook_24h")
+        o7d = meta.get("outlook_7d")
+        if o1h is not None:
+            def _dot(score: float | None) -> str:
+                if score is None:
+                    return "\u26aa"  # ⚪
+                if score > 0.60:
+                    return "\U0001f7e2"  # 🟢
+                if score < 0.40:
+                    return "\U0001f534"  # 🔴
+                return "\U0001f7e1"  # 🟡
+            outlook_row = (
+                f'<tr><td style="padding:4px 12px 4px 0;color:#888;">Outlook</td>'
+                f'<td style="padding:4px 0;font-size:16px;">'
+                f'{_dot(o1h)} <span style="font-size:11px;color:#888;">1h</span> '
+                f'{_dot(o24h)} <span style="font-size:11px;color:#888;">24h</span> '
+                f'{_dot(o7d)} <span style="font-size:11px;color:#888;">7d</span>'
+                f'</td></tr>'
+            )
+            detail_rows += outlook_row
+
         details_table = ""
         if detail_rows:
             details_table = (
                 f'<table style="margin:16px 0;border-collapse:collapse;">'
                 f"{detail_rows}</table>"
+            )
+
+        # Justification block
+        justification_block = ""
+        justification = meta.get("justification", "")
+        if justification:
+            justification_block = (
+                f'<div style="margin:12px 0;padding:10px 14px;background:#f0f4f8;'
+                f'border-radius:6px;border-left:3px solid #90cdf4;">'
+                f'<p style="margin:0 0 4px;font-size:11px;color:#888;'
+                f'text-transform:uppercase;letter-spacing:0.5px;">Justification</p>'
+                f'<p style="margin:0;font-size:13px;color:#444;line-height:1.5;">'
+                f'{justification}</p></div>'
             )
 
         return f"""
@@ -162,6 +199,7 @@ class EmailChannel:
                 <p style="margin:0;color:#555;font-size:14px;">{message}</p>
             </div>
             {details_table}
+            {justification_block}
             <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
             <p style="color:#aaa;font-size:11px;margin:0;">
                 Sent by cTrade &bull; Automated trading notification

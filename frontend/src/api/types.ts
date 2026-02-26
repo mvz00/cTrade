@@ -144,6 +144,9 @@ export interface Position {
   opened_at: string;
   closed_at: string | null;
   justification?: string;
+  outlook_1h?: number | null;
+  outlook_24h?: number | null;
+  outlook_7d?: number | null;
 }
 
 export interface Portfolio {

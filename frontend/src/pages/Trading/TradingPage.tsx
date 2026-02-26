@@ -431,7 +431,19 @@ export function TradingPage() {
                 {(positions || []).map(p => (
                   <Fragment key={p.id}>
                     <tr className="border-b border-ct-border/50">
-                      <td className="py-2 font-mono">{p.pair_symbol}</td>
+                      <td className="py-2 font-mono">
+                        <span className="flex items-center gap-1.5">
+                          {p.pair_symbol}
+                          {p.outlook_1h != null && (
+                            <span className="flex items-center gap-0.5 flex-shrink-0 text-[10px]"
+                                  title="Entry outlook: 1h · 24h · 7d">
+                              <OutlookDot score={p.outlook_1h} label="1h outlook" />
+                              <OutlookDot score={p.outlook_24h ?? p.outlook_1h} label="24h outlook" />
+                              <OutlookDot score={p.outlook_7d ?? p.outlook_1h} label="7d outlook" />
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="text-xs text-ct-text-dim capitalize">{p.exchange_name || '—'}</td>
                       <td>
                         <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>

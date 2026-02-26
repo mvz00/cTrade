@@ -68,6 +68,9 @@ class PositionResponse(BaseModel):
     opened_at: str
     closed_at: str | None = None
     justification: str = ""
+    outlook_1h: float | None = None
+    outlook_24h: float | None = None
+    outlook_7d: float | None = None
 
 
 class PortfolioResponse(BaseModel):

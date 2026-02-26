@@ -866,6 +866,7 @@ class TradingOrchestrator:
                 take_profit=tp_price,
                 exchange_name=exchange_name,
                 exchange_id=active_ex_id,
+                outlook=outlook,
             )
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status)
             logger.info(
