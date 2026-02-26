@@ -1049,13 +1049,18 @@ class TradingOrchestrator:
         pair's 1-hour price change must exceed the quicktrade threshold before
         a BUY is executed.  Targets currencies expected to make big gains in a
         short time window.
+
+        When CMC data is unavailable the momentum filter is bypassed and the
+        pair is treated like a normal long_only buy so trading is not blocked.
         """
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
 
         if signal.action == SignalAction.BUY:
-            # Momentum filter: only buy high-momentum pairs
-            if cmc_info is None or abs(cmc_info.get("pct_change_1h", 0)) < quicktrade_min_1h_change_pct:
-                pct = cmc_info["pct_change_1h"] if cmc_info else "N/A"
+            # Momentum filter: only buy high-momentum pairs (skip if CMC data
+            # is available but momentum is below threshold).  When CMC data is
+            # unavailable (cmc_info is None) we fall through to allow the buy.
+            if cmc_info is not None and abs(cmc_info.get("pct_change_1h", 0)) < quicktrade_min_1h_change_pct:
+                pct = cmc_info["pct_change_1h"]
                 self._log_activity(
                     "signal", pair,
                     f"QUICKTRADE skip {pair}: 1h change {pct}% < {quicktrade_min_1h_change_pct}% threshold",
