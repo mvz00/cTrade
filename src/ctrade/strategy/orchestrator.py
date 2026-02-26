@@ -815,6 +815,7 @@ class TradingOrchestrator:
         cmc_info: dict | None = None,
         stop_loss_pct: float = 0.03,
         take_profit_pct: float = 0.06,
+        outlook: dict[str, float] | None = None,
     ) -> None:
         """Open a new position (long or short) with standard position sizing."""
         total_value = portfolio["total_value_usd"]
@@ -1021,6 +1022,7 @@ class TradingOrchestrator:
                 pair, "buy", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
 
         elif signal.action == SignalAction.SELL:
@@ -1075,6 +1077,7 @@ class TradingOrchestrator:
                 pair, "sell", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
 
         elif signal.action == SignalAction.BUY:
@@ -1135,6 +1138,7 @@ class TradingOrchestrator:
                 pair, "buy", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
 
         elif signal.action == SignalAction.SELL:
@@ -1173,6 +1177,7 @@ class TradingOrchestrator:
                 pair, "sell", engine, market, signal, portfolio,
                 max_order_usdt, max_position_pct, composite, agreement, cmc_info,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
+                outlook=outlook,
             )
 
     async def _check_sl_tp(
