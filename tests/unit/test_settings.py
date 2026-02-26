@@ -15,7 +15,7 @@ def test_default_settings():
     assert settings.strategy.cvd_weight == 0.10
     assert settings.strategy.social_velocity_weight == 0.08
     assert settings.strategy.strategy_mode == "long_only"
-    assert settings.strategy.short_min_1h_change_pct == 2.0
+    assert settings.strategy.quicktrade_min_1h_change_pct == 2.0
     assert settings.api_port == 8000
 
 

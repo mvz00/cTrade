@@ -92,7 +92,7 @@ class RuntimeConfigStore:
             "intelligence_priority": settings.strategy.intelligence_priority,
             "signals_priority": settings.strategy.signals_priority,
             "strategy_mode": settings.strategy.strategy_mode,
-            "short_min_1h_change_pct": settings.strategy.short_min_1h_change_pct,
+            "quicktrade_min_1h_change_pct": settings.strategy.quicktrade_min_1h_change_pct,
             "risk_appetite": settings.strategy.risk_appetite,
             "entry_confidence_threshold": settings.strategy.entry_confidence_threshold,
             "exit_confidence_threshold": settings.strategy.exit_confidence_threshold,
@@ -365,6 +365,17 @@ class RuntimeConfigStore:
                         self._strategy["signals_priority"],
                     )
 
+                # Migration: short_only/both → quicktrade/long_only
+                if "short_min_1h_change_pct" in self._strategy:
+                    self._strategy["quicktrade_min_1h_change_pct"] = self._strategy.pop("short_min_1h_change_pct")
+                    logger.info("Migrated short_min_1h_change_pct → quicktrade_min_1h_change_pct")
+                if self._strategy.get("strategy_mode") == "short_only":
+                    self._strategy["strategy_mode"] = "quicktrade"
+                    logger.info("Migrated strategy_mode short_only → quicktrade")
+                elif self._strategy.get("strategy_mode") == "both":
+                    self._strategy["strategy_mode"] = "long_only"
+                    logger.info("Migrated strategy_mode both → long_only (both removed)")
+
             if "risk" in state and isinstance(state["risk"], dict):
                 self._risk.update(state["risk"])
 
@@ -458,6 +469,13 @@ class RuntimeConfigStore:
 
             if "strategy" in loaded and isinstance(loaded["strategy"], dict):
                 self._strategy.update(loaded["strategy"])
+                # Migration: short_only/both → quicktrade/long_only
+                if "short_min_1h_change_pct" in self._strategy:
+                    self._strategy["quicktrade_min_1h_change_pct"] = self._strategy.pop("short_min_1h_change_pct")
+                if self._strategy.get("strategy_mode") == "short_only":
+                    self._strategy["strategy_mode"] = "quicktrade"
+                elif self._strategy.get("strategy_mode") == "both":
+                    self._strategy["strategy_mode"] = "long_only"
 
             if "risk" in loaded and isinstance(loaded["risk"], dict):
                 self._risk.update(loaded["risk"])

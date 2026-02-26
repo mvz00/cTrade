@@ -40,8 +40,8 @@ class StrategyConfigUpdate(BaseModel):
     screener_priority: int | None = Field(None, ge=0, le=100)
     intelligence_priority: int | None = Field(None, ge=0, le=100)
     signals_priority: int | None = Field(None, ge=0, le=100)
-    strategy_mode: str | None = Field(None, pattern=r"^(long_only|short_only|both)$")
-    short_min_1h_change_pct: float | None = Field(None, ge=0.5, le=20.0)
+    strategy_mode: str | None = Field(None, pattern=r"^(long_only|quicktrade)$")
+    quicktrade_min_1h_change_pct: float | None = Field(None, ge=0.5, le=20.0)
     risk_appetite: int | None = Field(None, ge=1, le=10)
     entry_confidence_threshold: float | None = Field(None, ge=0, le=1)
     exit_confidence_threshold: float | None = Field(None, ge=0, le=1)
@@ -62,7 +62,7 @@ class StrategyConfigResponse(BaseModel):
     intelligence_priority: int = 50
     signals_priority: int = 50
     strategy_mode: str = "long_only"
-    short_min_1h_change_pct: float = 2.0
+    quicktrade_min_1h_change_pct: float = 2.0
     risk_appetite: int = 5
     entry_confidence_threshold: float
     exit_confidence_threshold: float

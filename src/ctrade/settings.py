@@ -79,7 +79,7 @@ class StrategySettings(BaseModel):
     intelligence_priority: int = 50
     signals_priority: int = 50
     strategy_mode: str = "long_only"
-    short_min_1h_change_pct: float = 2.0
+    quicktrade_min_1h_change_pct: float = 2.0
     risk_appetite: int = 5
     entry_confidence_threshold: float = 0.55
     exit_confidence_threshold: float = 0.45

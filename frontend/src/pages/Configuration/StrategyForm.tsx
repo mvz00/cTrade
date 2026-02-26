@@ -40,7 +40,7 @@ export function StrategyForm() {
   const [intelligence, setIntelligence] = useState(50);
   const [signals, setSignals] = useState(50);
   const [strategyMode, setStrategyMode] = useState('long_only');
-  const [shortMinChange, setShortMinChange] = useState(2.0);
+  const [quicktradeMinChange, setQuicktradeMinChange] = useState(2.0);
   const [riskAppetite, setRiskAppetite] = useState(5);
   const [minHold, setMinHold] = useState(15);
   const [dirty, setDirty] = useState(false);
@@ -51,7 +51,7 @@ export function StrategyForm() {
       setIntelligence(strategy.intelligence_priority ?? 50);
       setSignals(strategy.signals_priority ?? 50);
       setStrategyMode(strategy.strategy_mode || 'long_only');
-      setShortMinChange(strategy.short_min_1h_change_pct ?? 2.0);
+      setQuicktradeMinChange(strategy.quicktrade_min_1h_change_pct ?? 2.0);
       setRiskAppetite(strategy.risk_appetite ?? 5);
       setMinHold(strategy.min_hold_minutes ?? 15);
       setDirty(false);
@@ -68,7 +68,7 @@ export function StrategyForm() {
         intelligence_priority: intelligence,
         signals_priority: signals,
         strategy_mode: strategyMode,
-        short_min_1h_change_pct: shortMinChange,
+        quicktrade_min_1h_change_pct: quicktradeMinChange,
         risk_appetite: riskAppetite,
         min_hold_minutes: minHold,
       },
@@ -105,22 +105,21 @@ export function StrategyForm() {
           onChange={(v) => { setStrategyMode(v); setDirty(true); }}
           options={[
             { value: 'long_only', label: 'Long Only (Buy & Hold)' },
-            { value: 'short_only', label: 'Short Only (High Momentum)' },
-            { value: 'both', label: 'Both (Long & Short)' },
+            { value: 'quicktrade', label: 'Quicktrade (High Momentum)' },
           ]}
-          tooltip="Long Only buys and holds. Short Only profits from price drops. Both enables long and short positions."
+          tooltip="Long Only buys and holds with standard signal thresholds. Quicktrade only buys currencies showing strong short-term momentum, requiring a minimum 1-hour price change before entering."
         />
 
-        {(strategyMode === 'short_only' || strategyMode === 'both') && (
+        {strategyMode === 'quicktrade' && (
           <NumberInput
-            label="Short Min 1h Change"
-            value={shortMinChange}
-            onChange={(v) => { setShortMinChange(v); setDirty(true); }}
+            label="Min 1h Change"
+            value={quicktradeMinChange}
+            onChange={(v) => { setQuicktradeMinChange(v); setDirty(true); }}
             min={0.5}
             max={20}
             step={0.5}
             suffix="%"
-            tooltip="Minimum 1-hour price increase required before opening a short position. Higher values are more selective."
+            tooltip="Minimum 1-hour price change required before entering a Quicktrade position. Higher values are more selective and only buy into strong momentum."
           />
         )}
 
@@ -206,7 +205,7 @@ export function StrategyForm() {
                 setIntelligence(strategy.intelligence_priority ?? 50);
                 setSignals(strategy.signals_priority ?? 50);
                 setStrategyMode(strategy.strategy_mode || 'long_only');
-                setShortMinChange(strategy.short_min_1h_change_pct ?? 2.0);
+                setQuicktradeMinChange(strategy.quicktrade_min_1h_change_pct ?? 2.0);
                 setRiskAppetite(strategy.risk_appetite ?? 5);
                 setMinHold(strategy.min_hold_minutes ?? 15);
                 setDirty(false);
