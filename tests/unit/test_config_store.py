@@ -39,12 +39,12 @@ class TestConfigStoreStrategy:
         assert strategy["cvd_weight"] == 0.10
         assert strategy["social_velocity_weight"] == 0.08
         assert strategy["strategy_mode"] == "long_only"
-        assert strategy["short_min_1h_change_pct"] == 2.0
+        assert strategy["quicktrade_min_1h_change_pct"] == 2.0
 
     def test_update_strategy_mode(self):
         store = RuntimeConfigStore.get()
-        updated = store.update_strategy({"strategy_mode": "short_only"})
-        assert updated["strategy_mode"] == "short_only"
+        updated = store.update_strategy({"strategy_mode": "quicktrade"})
+        assert updated["strategy_mode"] == "quicktrade"
         # Weights unchanged
         assert updated["technical_weight"] == 0.30
 

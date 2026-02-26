@@ -158,12 +158,12 @@ async def test_put_strategy_mode(test_app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.put(
             "/api/v1/config/strategy",
-            json={"strategy_mode": "short_only", "short_min_1h_change_pct": 3.0},
+            json={"strategy_mode": "quicktrade", "quicktrade_min_1h_change_pct": 3.0},
         )
     assert response.status_code == 200
     data = response.json()
-    assert data["strategy_mode"] == "short_only"
-    assert data["short_min_1h_change_pct"] == 3.0
+    assert data["strategy_mode"] == "quicktrade"
+    assert data["quicktrade_min_1h_change_pct"] == 3.0
 
 
 @pytest.mark.asyncio

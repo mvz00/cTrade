@@ -83,7 +83,7 @@ export interface StrategyConfig {
   intelligence_priority: number;
   signals_priority: number;
   strategy_mode: string;
-  short_min_1h_change_pct: number;
+  quicktrade_min_1h_change_pct: number;
   risk_appetite: number;
   entry_confidence_threshold: number;
   exit_confidence_threshold: number;
@@ -293,7 +293,7 @@ export interface StrategyConfigUpdate {
   intelligence_priority?: number;
   signals_priority?: number;
   strategy_mode?: string;
-  short_min_1h_change_pct?: number;
+  quicktrade_min_1h_change_pct?: number;
   risk_appetite?: number;
   entry_confidence_threshold?: number;
   exit_confidence_threshold?: number;

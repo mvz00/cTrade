@@ -63,8 +63,7 @@ class StrategyMode(StrEnum):
     """Strategy position mode — controls which sides the orchestrator trades."""
 
     LONG_ONLY = "long_only"
-    SHORT_ONLY = "short_only"
-    BOTH = "both"
+    QUICKTRADE = "quicktrade"
 
 
 class Timeframe(StrEnum):

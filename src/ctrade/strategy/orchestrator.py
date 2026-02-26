@@ -385,7 +385,7 @@ class TradingOrchestrator:
         ranked_pairs = self._rank_pairs_by_momentum(pairs)
 
         strategy_mode = strategy.get("strategy_mode", "long_only")
-        short_min_1h_change_pct = strategy.get("short_min_1h_change_pct", 2.0)
+        quicktrade_min_1h_change_pct = strategy.get("quicktrade_min_1h_change_pct", 2.0)
         min_hold_minutes = strategy.get("min_hold_minutes", 15)
 
         processed = 0
@@ -413,7 +413,7 @@ class TradingOrchestrator:
                     max_order_usdt,
                     p_sl, p_tp,
                     strategy,
-                    strategy_mode, short_min_1h_change_pct,
+                    strategy_mode, quicktrade_min_1h_change_pct,
                     amplification=amplification,
                     min_hold_minutes=min_hold_minutes,
                     sl_rebuy_delay_hours=p_sl_rebuy,
@@ -491,7 +491,7 @@ class TradingOrchestrator:
         take_profit_pct: float,
         strategy: dict[str, Any],
         strategy_mode: str = "long_only",
-        short_min_1h_change_pct: float = 2.0,
+        quicktrade_min_1h_change_pct: float = 2.0,
         amplification: float = 1.0,
         min_hold_minutes: int = 15,
         sl_rebuy_delay_hours: float = 1.0,
@@ -775,22 +775,12 @@ class TradingOrchestrator:
                 outlook=outlook, min_hold_minutes=min_hold_minutes,
                 sl_rebuy_delay_hours=sl_rebuy_delay_hours,
             )
-        elif strategy_mode == "short_only":
-            await self._execute_short_only(
+        elif strategy_mode == "quicktrade":
+            await self._execute_quicktrade(
                 signal, pair, engine, market, signal_mgr,
                 portfolio, open_positions, max_open, max_order_usdt,
                 max_position_pct, composite, agreement,
-                short_min_1h_change_pct,
-                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
-                outlook=outlook, min_hold_minutes=min_hold_minutes,
-                sl_rebuy_delay_hours=sl_rebuy_delay_hours,
-            )
-        elif strategy_mode == "both":
-            await self._execute_both(
-                signal, pair, engine, market, signal_mgr,
-                portfolio, open_positions, max_open, max_order_usdt,
-                max_position_pct, composite, agreement,
-                short_min_1h_change_pct,
+                quicktrade_min_1h_change_pct,
                 stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
                 outlook=outlook, min_hold_minutes=min_hold_minutes,
                 sl_rebuy_delay_hours=sl_rebuy_delay_hours,
@@ -1043,91 +1033,36 @@ class TradingOrchestrator:
                 return
             await self._close_positions(pair, "long", engine, composite, agreement)
 
-    async def _execute_short_only(
+    async def _execute_quicktrade(
         self, signal: Signal, pair: str, engine: Any, market: MarketDataProvider,
         signal_mgr: SignalManager, portfolio: dict, open_positions: int,
         max_open: int, max_order_usdt: float, max_position_pct: float,
-        composite: float, agreement: str, short_min_1h_change_pct: float,
+        composite: float, agreement: str, quicktrade_min_1h_change_pct: float,
         stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
         outlook: dict[str, float] | None = None,
         min_hold_minutes: int = 15,
         sl_rebuy_delay_hours: float = 1.0,
     ) -> None:
-        """Short-only mode: SELL opens short (momentum filter), BUY closes short."""
-        cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
+        """Quicktrade mode: BUY opens long only when momentum is high, SELL closes long.
 
-        if signal.action == SignalAction.SELL:
-            # Momentum filter: only short high-volatility pairs
-            if cmc_info is None or abs(cmc_info.get("pct_change_1h", 0)) < short_min_1h_change_pct:
-                pct = cmc_info["pct_change_1h"] if cmc_info else "N/A"
-                self._log_activity(
-                    "signal", pair,
-                    f"SHORT_ONLY skip {pair}: 1h change {pct}% < {short_min_1h_change_pct}% threshold",
-                    {"pair": pair, "pct_change_1h": pct, "threshold": short_min_1h_change_pct,
-                     **(outlook or {})},
-                )
-                return
-
-            if open_positions >= max_open:
-                return
-            existing = engine.get_positions(status="open")
-            if any(p["pair_symbol"] == pair and p["side"] == "short" for p in existing):
-                return
-            if self._is_sl_rebuy_blocked(pair, sl_rebuy_delay_hours):
-                self._log_activity("signal", pair,
-                    f"SHORT BLOCKED {pair}: re-buy delay active ({sl_rebuy_delay_hours}h after SL)",
-                    {"action": "REBUY_BLOCKED", "composite": composite})
-                return
-            await self._open_position(
-                pair, "sell", engine, market, signal, portfolio,
-                max_order_usdt, max_position_pct, composite, agreement, cmc_info,
-                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
-                outlook=outlook,
-            )
-
-        elif signal.action == SignalAction.BUY:
-            positions = engine.get_positions(status="open")
-            if self._is_within_cooldown(positions, pair, "short", min_hold_minutes):
-                logger.info("HOLD (cooldown) %s: close-short suppressed — position < %d min old", pair, min_hold_minutes)
-                self._log_activity(
-                    "signal", pair,
-                    f"HOLD (cooldown) {pair}: close-short suppressed — position < {min_hold_minutes}min old",
-                    {"action": "CLOSE_SHORT_SUPPRESSED", "composite": composite,
-                     "agreement": agreement, "min_hold_minutes": min_hold_minutes},
-                )
-                return
-            await self._close_positions(pair, "short", engine, composite, agreement)
-
-    async def _execute_both(
-        self, signal: Signal, pair: str, engine: Any, market: MarketDataProvider,
-        signal_mgr: SignalManager, portfolio: dict, open_positions: int,
-        max_open: int, max_order_usdt: float, max_position_pct: float,
-        composite: float, agreement: str, short_min_1h_change_pct: float,
-        stop_loss_pct: float = 0.03, take_profit_pct: float = 0.06,
-        outlook: dict[str, float] | None = None,
-        min_hold_minutes: int = 15,
-        sl_rebuy_delay_hours: float = 1.0,
-    ) -> None:
-        """Both mode: BUY closes short + opens long, SELL closes long + opens short."""
+        Like long_only but with an additional momentum filter on entry: the
+        pair's 1-hour price change must exceed the quicktrade threshold before
+        a BUY is executed.  Targets currencies expected to make big gains in a
+        short time window.
+        """
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
 
         if signal.action == SignalAction.BUY:
-            # Close any short first (with cooldown check)
-            positions = engine.get_positions(status="open")
-            if self._is_within_cooldown(positions, pair, "short", min_hold_minutes):
-                logger.info("HOLD (cooldown) %s: close-short suppressed — position < %d min old", pair, min_hold_minutes)
+            # Momentum filter: only buy high-momentum pairs
+            if cmc_info is None or abs(cmc_info.get("pct_change_1h", 0)) < quicktrade_min_1h_change_pct:
+                pct = cmc_info["pct_change_1h"] if cmc_info else "N/A"
                 self._log_activity(
                     "signal", pair,
-                    f"HOLD (cooldown) {pair}: close-short suppressed — position < {min_hold_minutes}min old",
-                    {"action": "CLOSE_SHORT_SUPPRESSED", "composite": composite,
-                     "agreement": agreement, "min_hold_minutes": min_hold_minutes},
+                    f"QUICKTRADE skip {pair}: 1h change {pct}% < {quicktrade_min_1h_change_pct}% threshold",
+                    {"pair": pair, "pct_change_1h": pct, "threshold": quicktrade_min_1h_change_pct,
+                     **(outlook or {})},
                 )
-            else:
-                await self._close_positions(pair, "short", engine, composite, agreement)
-
-            # Re-check open count after closing
-            portfolio = await engine.get_portfolio()
-            open_positions = portfolio["open_positions"]
+                return
 
             if open_positions >= max_open:
                 return
@@ -1147,43 +1082,17 @@ class TradingOrchestrator:
             )
 
         elif signal.action == SignalAction.SELL:
-            # Close any long first (with cooldown check)
             positions = engine.get_positions(status="open")
             if self._is_within_cooldown(positions, pair, "long", min_hold_minutes):
-                logger.info("HOLD (cooldown) %s: close-long suppressed — position < %d min old", pair, min_hold_minutes)
+                logger.info("HOLD (cooldown) %s: SELL suppressed — position < %d min old", pair, min_hold_minutes)
                 self._log_activity(
                     "signal", pair,
-                    f"HOLD (cooldown) {pair}: close-long suppressed — position < {min_hold_minutes}min old",
+                    f"HOLD (cooldown) {pair}: SELL suppressed — position < {min_hold_minutes}min old",
                     {"action": "SELL_SUPPRESSED", "composite": composite,
                      "agreement": agreement, "min_hold_minutes": min_hold_minutes},
                 )
                 return
             await self._close_positions(pair, "long", engine, composite, agreement)
-
-            # Momentum filter for short entry
-            if cmc_info is None or abs(cmc_info.get("pct_change_1h", 0)) < short_min_1h_change_pct:
-                return
-
-            # Re-check open count after closing
-            portfolio = await engine.get_portfolio()
-            open_positions = portfolio["open_positions"]
-
-            if open_positions >= max_open:
-                return
-            existing = engine.get_positions(status="open")
-            if any(p["pair_symbol"] == pair and p["side"] == "short" for p in existing):
-                return
-            if self._is_sl_rebuy_blocked(pair, sl_rebuy_delay_hours):
-                self._log_activity("signal", pair,
-                    f"SHORT BLOCKED {pair}: re-buy delay active ({sl_rebuy_delay_hours}h after SL)",
-                    {"action": "REBUY_BLOCKED", "composite": composite})
-                return
-            await self._open_position(
-                pair, "sell", engine, market, signal, portfolio,
-                max_order_usdt, max_position_pct, composite, agreement, cmc_info,
-                stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
-                outlook=outlook,
-            )
 
     async def _check_sl_tp(
         self,
