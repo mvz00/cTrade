@@ -192,7 +192,7 @@ class PaperEngine:
                 metadata=meta,
             )
         except Exception:
-            pass  # Non-fatal — don't break order flow
+            logger.warning("Order-fill notification failed", exc_info=True)
 
     # ---- Watched pairs ----
 

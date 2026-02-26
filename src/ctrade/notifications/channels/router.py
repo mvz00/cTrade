@@ -65,6 +65,54 @@ class NotificationRouter:
         """Return names of all registered channels."""
         return [ch.name for ch in self._channels]
 
+    def ensure_email_channel(self) -> None:
+        """Auto-register the email channel from config if enabled but missing.
+
+        Handles edge cases where the channel wasn't registered at startup
+        (e.g. config loaded from DB after step 6, hot-reload failed, etc.).
+        """
+        if any(ch.name == "email" for ch in self._channels):
+            return
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+
+            if not RuntimeConfigStore.is_initialized():
+                logger.info("ensure_email_channel: config store not initialized — skipping")
+                return
+            store = RuntimeConfigStore.get()
+            email_cfg = store.get_email()
+            api_key = store.get_email_api_key_decrypted()
+            enabled = email_cfg.get("enabled")
+            to_address = email_cfg.get("to_address", "")
+            has_key = bool(api_key)
+
+            if not enabled:
+                logger.info("ensure_email_channel: email disabled in config")
+                return
+            if not has_key:
+                logger.warning(
+                    "ensure_email_channel: no API key (encrypted=%s)",
+                    bool(email_cfg.get("api_key_encrypted")),
+                )
+                return
+            if not to_address:
+                logger.warning("ensure_email_channel: no to_address configured")
+                return
+
+            from ctrade.notifications.channels.email import EmailChannel
+
+            ch = EmailChannel(
+                api_key=api_key,
+                from_address=email_cfg.get("from_address", ""),
+                to_address=to_address,
+                notify_on_buy=email_cfg.get("notify_on_buy", True),
+                notify_on_sell=email_cfg.get("notify_on_sell", True),
+            )
+            self.register(ch)
+            logger.info("Auto-registered email channel from config (to=%s)", to_address)
+        except Exception:
+            logger.warning("Could not auto-register email channel", exc_info=True)
+
     async def dispatch(
         self,
         message: str,
