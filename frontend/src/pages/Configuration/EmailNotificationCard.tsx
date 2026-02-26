@@ -1,14 +1,15 @@
-import { useEmailConfig, useUpdateEmailConfig } from '@/api/hooks/useConfig';
+import { useEmailConfig, useUpdateEmailConfig, useTestEmail } from '@/api/hooks/useConfig';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { TextInput } from '@/components/ui/TextInput';
 import { Toggle } from '@/components/ui/Toggle';
 import { useToast } from '@/components/ui/Toast';
-import { Mail } from 'lucide-react';
+import { Mail, SendHorizonal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export function EmailNotificationCard() {
   const { data: config } = useEmailConfig();
   const updateConfig = useUpdateEmailConfig();
+  const testEmail = useTestEmail();
   const { toast } = useToast();
 
   const [form, setForm] = useState({
@@ -37,6 +38,19 @@ export function EmailNotificationCard() {
   function handleSave() {
     updateConfig.mutate(form, {
       onSuccess: () => toast('Email settings saved', 'success'),
+      onError: (err) => toast(err.message, 'error'),
+    });
+  }
+
+  function handleTestEmail() {
+    testEmail.mutate(undefined, {
+      onSuccess: (result) => {
+        if (result.success) {
+          toast('Test email sent! Check your inbox.', 'success');
+        } else {
+          toast(`Test email failed: ${result.error}`, 'error');
+        }
+      },
       onError: (err) => toast(err.message, 'error'),
     });
   }
@@ -111,6 +125,14 @@ export function EmailNotificationCard() {
           className="px-4 py-2 rounded-lg text-sm font-medium bg-ct-accent text-ct-bg hover:bg-ct-accent/90 disabled:opacity-50 transition-colors"
         >
           {updateConfig.isPending ? 'Saving...' : 'Save Settings'}
+        </button>
+        <button
+          onClick={handleTestEmail}
+          disabled={testEmail.isPending || !form.enabled}
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-ct-border text-ct-text hover:bg-ct-bg-secondary disabled:opacity-50 transition-colors flex items-center gap-1.5"
+        >
+          <SendHorizonal size={14} />
+          {testEmail.isPending ? 'Sending...' : 'Send Test Email'}
         </button>
       </div>
     </Card>

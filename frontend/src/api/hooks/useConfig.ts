@@ -78,3 +78,9 @@ export function useUpdateEmailConfig() {
     },
   });
 }
+
+export function useTestEmail() {
+  return useMutation({
+    mutationFn: () => api.testEmail(),
+  });
+}
