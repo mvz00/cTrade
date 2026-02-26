@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
-import type { PlaceOrderRequest, QuickBuyRequest } from '../types';
+import type { PlaceOrderRequest, QuickBuyRequest, SymbolCandleSeries } from '../types';
 
 export function usePairs() {
   return useQuery({ queryKey: ['trading', 'pairs'], queryFn: api.listPairs, refetchInterval: REFETCH_INTERVALS.TRADING });
@@ -168,5 +168,18 @@ export function useClearActivity() {
   return useMutation({
     mutationFn: () => api.clearActivity(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['trading', 'activity'] }),
+  });
+}
+
+export function usePositionCandles(
+  symbols: string[],
+  timeframe: string,
+  limit: number,
+) {
+  return useQuery<SymbolCandleSeries[]>({
+    queryKey: ['trading', 'candles', symbols.join(','), timeframe, limit],
+    queryFn: () => api.getCandles(symbols, timeframe, limit),
+    enabled: symbols.length > 0,
+    refetchInterval: REFETCH_INTERVALS.TRADING,
   });
 }

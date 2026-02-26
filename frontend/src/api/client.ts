@@ -49,6 +49,7 @@ import type {
   ConnectionTestResult,
   ConnectionCredentialsRequest,
   PortfolioHistorySeries,
+  SymbolCandleSeries,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -223,6 +224,12 @@ export const api = {
     return apiFetch<ScreenerResponse>(`/screener/search${q ? `?${q}` : ''}`);
   },
   cmcFeedStatus: () => apiFetch<CMCFeedStatus>('/screener/status'),
+
+  // ---- Position Candles ----
+  getCandles: (symbols: string[], timeframe: string, limit: number) =>
+    apiFetch<SymbolCandleSeries[]>(
+      `/trading/candles?symbols=${encodeURIComponent(symbols.join(','))}&timeframe=${timeframe}&limit=${limit}`,
+    ),
 
   // ---- Connections ----
   connections: () => apiFetch<ConnectionsResponse>('/connections'),
