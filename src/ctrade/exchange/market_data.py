@@ -916,7 +916,7 @@ class MarketDataProvider:
         base, quote = parts[0].upper(), parts[1].upper()
 
         if quote in ("AUD", "USDT"):
-            # Standard buy/sell endpoint
+            # Try standard market buy/sell endpoint first
             endpoint = f"/api/v2/my/{'buy' if side == 'buy' else 'sell'}"
             payload: dict[str, Any] = {
                 "cointype": base,
@@ -930,9 +930,36 @@ class MarketDataProvider:
                 base, quantity, price, quote.lower(),
             )
 
-            data = await MarketDataProvider._coinspot_v2_request(
-                api_key, api_secret, endpoint, payload,
-            )
+            try:
+                data = await MarketDataProvider._coinspot_v2_request(
+                    api_key, api_secret, endpoint, payload,
+                )
+            except RuntimeError as market_err:
+                # Some coins only support instant buy/sell (no order book).
+                # Fall back to /buy/now or /sell/now when market endpoint
+                # returns "unavailable" or "not found".
+                err_lower = str(market_err).lower()
+                if "unavailable" in err_lower or "not found" in err_lower:
+                    logger.info(
+                        "CoinSpot market order unavailable for %s, falling back to instant %s",
+                        base, side,
+                    )
+                    instant_endpoint = f"/api/v2/my/{'buy' if side == 'buy' else 'sell'}/now"
+                    instant_payload: dict[str, Any] = {
+                        "cointype": base,
+                        "amounttype": "coin",
+                        "amount": str(quantity),
+                    }
+                    data = await MarketDataProvider._coinspot_v2_request(
+                        api_key, api_secret, instant_endpoint, instant_payload,
+                    )
+                    # Instant endpoint returns actual fill rate — use it
+                    # instead of the submitted price for accurate PnL.
+                    fill_rate = float(data.get("rate", price))
+                    if fill_rate > 0:
+                        price = fill_rate
+                else:
+                    raise
 
         elif quote == "BTC":
             # Swap endpoint for crypto-to-crypto via BTC
