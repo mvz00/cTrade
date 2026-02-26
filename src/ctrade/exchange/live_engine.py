@@ -93,6 +93,7 @@ class LiveEngine:
         try:
             from ctrade.notifications.channels.router import NotificationRouter
             router = NotificationRouter.get_instance()
+            router.ensure_email_channel()
             channels = router.list_channels()
             if not channels:
                 logger.debug("No notification channels registered — skipping order-fill notification")
@@ -318,6 +319,24 @@ class LiveEngine:
                                 _cp = float(_fb_ticker.last_price)
                             slippage = 1.005 if side == "buy" else 0.995
                             effective_price = round(_cp * slippage, 8)
+
+                # Last resort: try CoinSpot native public API directly
+                if effective_price is None and symbol.endswith("/AUD"):
+                    _native = await MarketDataProvider._fetch_coinspot_price_native(symbol)
+                    if _native:
+                        if side == "sell" and float(_native.bid) > 0:
+                            _np = float(_native.bid)
+                        elif side == "buy" and float(_native.ask) > 0:
+                            _np = float(_native.ask)
+                        else:
+                            _np = float(_native.last_price)
+                        if _np > 0:
+                            slippage = 1.005 if side == "buy" else 0.995
+                            effective_price = round(_np * slippage, 8)
+                            logger.info(
+                                "CoinSpot price resolved via native API: %s %s @ %.8f",
+                                side.upper(), symbol, effective_price,
+                            )
 
                 if effective_price is None:
                     order.status = OrderStatus.REJECTED
