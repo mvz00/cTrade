@@ -128,12 +128,12 @@ async def update_risk_config(body: RiskConfigUpdate) -> RiskConfigResponse:
 
 @router.get("/email", response_model=EmailConfigResponse)
 async def get_email_config() -> EmailConfigResponse:
-    """Get email notification settings (password masked)."""
+    """Get email notification settings (API key masked)."""
     config = (await _store()).get_email()
-    # Mask password — never expose the encrypted blob to the frontend
-    has_password = bool(config.get("password_encrypted"))
-    safe = {k: v for k, v in config.items() if k != "password_encrypted"}
-    safe["password"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_password else ""
+    # Mask API key — never expose the encrypted blob to the frontend
+    has_key = bool(config.get("api_key_encrypted"))
+    safe = {k: v for k, v in config.items() if k != "api_key_encrypted"}
+    safe["api_key"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_key else ""
     return EmailConfigResponse(**safe)
 
 
@@ -141,14 +141,14 @@ async def get_email_config() -> EmailConfigResponse:
 async def update_email_config(body: EmailConfigUpdate) -> EmailConfigResponse:
     """Update email notification settings.
 
-    If password is ``"••••••"`` (the masked placeholder), the existing
-    encrypted password is preserved.  Send a new plaintext value to change it.
+    If api_key is ``"••••••"`` (the masked placeholder), the existing
+    encrypted key is preserved.  Send a new plaintext value to change it.
     """
     updates = body.model_dump(exclude_none=True)
     updated = (await _store()).update_email(updates)
 
     # Return masked response
-    has_password = bool(updated.get("password_encrypted"))
-    safe = {k: v for k, v in updated.items() if k != "password_encrypted"}
-    safe["password"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_password else ""
+    has_key = bool(updated.get("api_key_encrypted"))
+    safe = {k: v for k, v in updated.items() if k != "api_key_encrypted"}
+    safe["api_key"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_key else ""
     return EmailConfigResponse(**safe)

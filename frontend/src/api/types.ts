@@ -225,24 +225,16 @@ export interface IndicatorData {
 
 export interface EmailConfig {
   enabled: boolean;
-  smtp_host: string;
-  smtp_port: number;
-  username: string;
-  password: string;  // masked as "••••••" when set
+  api_key: string;  // masked as "••••••" when set
   from_address: string;
   to_address: string;
-  use_tls: boolean;
 }
 
 export interface EmailConfigUpdate {
   enabled?: boolean;
-  smtp_host?: string;
-  smtp_port?: number;
-  username?: string;
-  password?: string;
+  api_key?: string;
   from_address?: string;
   to_address?: string;
-  use_tls?: boolean;
 }
 
 export interface AlertConfig {
