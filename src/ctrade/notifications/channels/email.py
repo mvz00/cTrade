@@ -84,12 +84,13 @@ class EmailChannel:
                 "Content-Type": "application/json",
             }
 
+            logger.info("Sending email via MailerSend: to=%s subject=%s", self._to_address, subject)
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     _MAILERSEND_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status == 202:
-                        logger.debug("Email notification sent: %s", subject)
+                        logger.info("Email notification sent successfully: %s", subject)
                         return True
                     body = await resp.text()
                     logger.warning(

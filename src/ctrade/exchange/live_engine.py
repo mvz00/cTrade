@@ -93,7 +93,9 @@ class LiveEngine:
         try:
             from ctrade.notifications.channels.router import NotificationRouter
             router = NotificationRouter.get_instance()
-            if not router.list_channels():
+            channels = router.list_channels()
+            if not channels:
+                logger.debug("No notification channels registered — skipping order-fill notification")
                 return
             side = order.side.value if hasattr(order.side, "value") else str(order.side)
             qty = float(order.filled_quantity) if order.filled_quantity else 0
@@ -116,13 +118,22 @@ class LiveEngine:
                 meta["outlook_1h"] = outlook.get("outlook_1h")
                 meta["outlook_24h"] = outlook.get("outlook_24h")
                 meta["outlook_7d"] = outlook.get("outlook_7d")
-            await router.dispatch(
+            logger.info(
+                "Dispatching order-fill notification to %d channel(s): %s",
+                len(channels), ", ".join(channels),
+            )
+            results = await router.dispatch(
                 message=message,
                 severity="success",
                 metadata=meta,
             )
+            for ch_name, ok in results.items():
+                if ok:
+                    logger.info("Notification sent via %s", ch_name)
+                else:
+                    logger.warning("Notification FAILED via %s", ch_name)
         except Exception:
-            pass  # Non-fatal — don't break order flow
+            logger.warning("Order-fill notification failed", exc_info=True)
 
     # ---- Watched pairs (delegated to PaperEngine — shared state) ----
 

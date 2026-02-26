@@ -123,6 +123,8 @@ export const api = {
   emailConfig: () => apiFetch<EmailConfig>('/config/email'),
   updateEmailConfig: (body: EmailConfigUpdate) =>
     apiFetch<EmailConfig>('/config/email', { method: 'PUT', body: JSON.stringify(body) }),
+  testEmail: () =>
+    apiFetch<{ success: boolean; error: string }>('/config/email/test', { method: 'POST' }),
 
   listExchanges: () => apiFetch<ExchangeInfo[]>('/exchanges/'),
   availableExchanges: () => apiFetch<AvailableExchange[]>('/exchanges/available'),

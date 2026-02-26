@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from ctrade.api.schemas.config import (
@@ -15,6 +17,8 @@ from ctrade.api.schemas.config import (
     TradingModeUpdate,
 )
 from ctrade.core.config_store import RuntimeConfigStore
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -174,10 +178,70 @@ async def update_email_config(body: EmailConfigUpdate) -> EmailConfigResponse:
         else:
             router.unregister("email")
     except Exception:
-        pass  # Non-fatal — don't break config save
+        logger.warning("Email channel hot-reload failed", exc_info=True)
 
     # Return masked response
     has_key = bool(updated.get("api_key_encrypted"))
     safe = {k: v for k, v in updated.items() if k != "api_key_encrypted"}
     safe["api_key"] = "\u2022\u2022\u2022\u2022\u2022\u2022" if has_key else ""
     return EmailConfigResponse(**safe)
+
+
+@router.post("/email/test")
+async def test_email() -> dict[str, bool | str]:
+    """Send a test email to verify MailerSend configuration.
+
+    Returns ``{"success": true}`` if the MailerSend API accepted the
+    message (HTTP 202), or ``{"success": false, "error": "..."}`` with
+    details if something went wrong.
+    """
+    store = await _store()
+    email_cfg = store.get_email()
+
+    if not email_cfg.get("enabled"):
+        raise HTTPException(status_code=422, detail="Email notifications are disabled")
+
+    api_key = store.get_email_api_key_decrypted()
+    if not api_key:
+        raise HTTPException(
+            status_code=422,
+            detail="No MailerSend API key configured (or decryption failed)",
+        )
+
+    to_address = email_cfg.get("to_address", "")
+    if not to_address:
+        raise HTTPException(status_code=422, detail="No recipient (to_address) configured")
+
+    from_address = email_cfg.get("from_address", "")
+
+    # Send a real test email via MailerSend
+    try:
+        from ctrade.notifications.channels.email import EmailChannel
+
+        channel = EmailChannel(
+            api_key=api_key,
+            from_address=from_address,
+            to_address=to_address,
+        )
+
+        ok = await channel.send(
+            message="This is a test email from cTrade to verify your notification settings are working correctly.",
+            severity="info",
+            metadata={"title": "cTrade Test Email"},
+        )
+
+        if ok:
+            logger.info("Test email sent successfully to %s", to_address)
+            return {"success": True, "error": ""}
+        else:
+            logger.warning("Test email failed — MailerSend rejected the request")
+            return {
+                "success": False,
+                "error": (
+                    "MailerSend rejected the request. Check that your API key is valid "
+                    "and the from_address domain is verified in your MailerSend account."
+                ),
+            }
+    except Exception as e:
+        logger.warning("Test email error: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
