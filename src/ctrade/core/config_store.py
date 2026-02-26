@@ -109,7 +109,7 @@ class RuntimeConfigStore:
         self._exchanges: list[ExchangeEntry] = []
         self._feed_credentials: dict[str, dict[str, bytes]] = {}
         self._email: dict[str, Any] = {
-            "enabled": False,
+            "enabled": True,
             "api_key_encrypted": "",  # base64-encoded encrypted MailerSend API key
             "from_address": "",
             "to_address": "",
