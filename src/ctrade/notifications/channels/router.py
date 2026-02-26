@@ -49,8 +49,17 @@ class NotificationRouter:
 
     def register(self, channel: NotificationChannel) -> None:
         """Register a new notification channel."""
+        # Replace existing channel with the same name (hot-reload support)
+        self._channels = [ch for ch in self._channels if ch.name != channel.name]
         self._channels.append(channel)
         logger.info("Registered notification channel: %s", channel.name)
+
+    def unregister(self, name: str) -> None:
+        """Remove a notification channel by name."""
+        before = len(self._channels)
+        self._channels = [ch for ch in self._channels if ch.name != name]
+        if len(self._channels) < before:
+            logger.info("Unregistered notification channel: %s", name)
 
     def list_channels(self) -> list[str]:
         """Return names of all registered channels."""
