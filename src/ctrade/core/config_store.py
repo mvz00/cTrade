@@ -115,6 +115,7 @@ class RuntimeConfigStore:
             "use_tls": True,
         }
         self._data_lock = threading.Lock()
+        self._hydrated: bool = False
 
         # Restore persisted state (overlays on top of defaults)
         self._load_from_disk()
@@ -405,6 +406,7 @@ class RuntimeConfigStore:
 
         if not is_db_ready():
             logger.info("DB not available — RuntimeConfigStore using disk/defaults only")
+            self._hydrated = True
             return
 
         async def _load(session: Any) -> dict[str, Any]:
@@ -418,6 +420,7 @@ class RuntimeConfigStore:
         loaded = await run_simple_db_operation(_load, description="hydrate RuntimeConfigStore")
         if not loaded:
             logger.info("No runtime config found in DB — using disk/defaults")
+            self._hydrated = True
             return
 
         with self._data_lock:
@@ -484,6 +487,16 @@ class RuntimeConfigStore:
 
         # Re-save to disk so the local file is in sync for intra-deploy restarts
         self._save_to_disk()
+        self._hydrated = True
+
+    async def ensure_hydrated(self) -> None:
+        """Hydrate from DB if not already done. Safe to call multiple times."""
+        if self._hydrated:
+            return
+        try:
+            await self.hydrate_from_db()
+        except Exception:
+            logger.warning("ensure_hydrated failed — using current in-memory state", exc_info=True)
 
     # ---- Trading config ----
 

@@ -108,6 +108,10 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from ctrade.strategy.orchestrator import TradingOrchestrator
             from ctrade.strategy.signal_manager import SignalManager
 
+            # Config store first — exchanges must be loaded before engines use them
+            if RuntimeConfigStore.is_initialized():
+                await RuntimeConfigStore.get().hydrate_from_db()
+
             await PaperEngine.get_instance().hydrate_from_db()
             await LiveEngine.get_instance().hydrate_from_db()
             await SignalManager.get_instance().hydrate_from_db()
