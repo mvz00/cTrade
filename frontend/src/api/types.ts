@@ -78,6 +78,10 @@ export interface StrategyConfig {
   market_sentiment_weight: number;
   cvd_weight: number;
   social_velocity_weight: number;
+  screener_weight: number;
+  screener_priority: number;
+  intelligence_priority: number;
+  signals_priority: number;
   strategy_mode: string;
   short_min_1h_change_pct: number;
   risk_appetite: number;
@@ -285,6 +289,10 @@ export interface StrategyConfigUpdate {
   market_sentiment_weight?: number;
   cvd_weight?: number;
   social_velocity_weight?: number;
+  screener_weight?: number;
+  screener_priority?: number;
+  intelligence_priority?: number;
+  signals_priority?: number;
   strategy_mode?: string;
   short_min_1h_change_pct?: number;
   risk_appetite?: number;

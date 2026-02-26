@@ -87,6 +87,10 @@ class RuntimeConfigStore:
             "market_sentiment_weight": settings.strategy.market_sentiment_weight,
             "cvd_weight": settings.strategy.cvd_weight,
             "social_velocity_weight": settings.strategy.social_velocity_weight,
+            "screener_weight": settings.strategy.screener_weight,
+            "screener_priority": settings.strategy.screener_priority,
+            "intelligence_priority": settings.strategy.intelligence_priority,
+            "signals_priority": settings.strategy.signals_priority,
             "strategy_mode": settings.strategy.strategy_mode,
             "short_min_1h_change_pct": settings.strategy.short_min_1h_change_pct,
             "risk_appetite": settings.strategy.risk_appetite,
@@ -336,6 +340,33 @@ class RuntimeConfigStore:
                         ", ".join(f"{k}={_DEFAULT_WEIGHTS[k]}" for k in missing_keys),
                     )
 
+                # Migration: add source-priority sliders and screener_weight
+                if "screener_priority" not in self._strategy:
+                    # Derive approximate priorities from existing weights
+                    sw = self._strategy.get("screener_weight", 0)
+                    iw = (
+                        self._strategy.get("sentiment_weight", 0)
+                        + self._strategy.get("onchain_weight", 0)
+                        + self._strategy.get("market_sentiment_weight", 0)
+                        + self._strategy.get("social_velocity_weight", 0)
+                    )
+                    gw = (
+                        self._strategy.get("technical_weight", 0)
+                        + self._strategy.get("derivatives_weight", 0)
+                        + self._strategy.get("cvd_weight", 0)
+                    )
+                    total_w = sw + iw + gw or 1
+                    self._strategy["screener_priority"] = round(sw / total_w * 100)
+                    self._strategy["intelligence_priority"] = round(iw / total_w * 100)
+                    self._strategy["signals_priority"] = round(gw / total_w * 100)
+                    self._strategy.setdefault("screener_weight", 0.0)
+                    logger.info(
+                        "Migrated source priorities: screener=%d, intelligence=%d, signals=%d",
+                        self._strategy["screener_priority"],
+                        self._strategy["intelligence_priority"],
+                        self._strategy["signals_priority"],
+                    )
+
             if "risk" in state and isinstance(state["risk"], dict):
                 self._risk.update(state["risk"])
 
@@ -518,9 +549,56 @@ class RuntimeConfigStore:
         with self._data_lock:
             return dict(self._strategy)
 
+    @staticmethod
+    def _compute_weights_from_priorities(
+        screener: int, intelligence: int, signals: int,
+    ) -> dict[str, float]:
+        """Convert 3 category priorities (0-100) into 8 individual weights.
+
+        Fixed internal ratios within each category (proportional to the
+        original default weights):
+
+        - Screener:     momentum → 100%
+        - Intelligence: sentiment 23%, onchain 19%, market_sentiment 40%,
+                        social_velocity 19%
+        - Signals:      technical 53%, derivatives 30%, cvd 18%
+        """
+        total = screener + intelligence + signals
+        if total == 0:
+            total = 1  # avoid division by zero — all sliders at 0
+
+        s_pct = screener / total
+        i_pct = intelligence / total
+        g_pct = signals / total
+
+        return {
+            "screener_weight": round(s_pct, 4),
+            "sentiment_weight": round(i_pct * 0.2326, 4),
+            "onchain_weight": round(i_pct * 0.1860, 4),
+            "market_sentiment_weight": round(i_pct * 0.3953, 4),
+            "social_velocity_weight": round(i_pct * 0.1860, 4),
+            "technical_weight": round(g_pct * 0.5263, 4),
+            "derivatives_weight": round(g_pct * 0.2982, 4),
+            "cvd_weight": round(g_pct * 0.1754, 4),
+        }
+
     def update_strategy(self, updates: dict[str, Any]) -> dict[str, Any]:
         with self._data_lock:
+            # If category priorities are provided, compute individual weights
+            has_priorities = any(
+                k in updates
+                for k in ("screener_priority", "intelligence_priority", "signals_priority")
+            )
+            if has_priorities:
+                merged_prios = {**self._strategy, **updates}
+                sp = merged_prios.get("screener_priority", 50)
+                ip = merged_prios.get("intelligence_priority", 50)
+                gp = merged_prios.get("signals_priority", 50)
+                weight_updates = self._compute_weights_from_priorities(sp, ip, gp)
+                updates = {**updates, **weight_updates}
+
             merged = {**self._strategy, **updates}
+
             # Validate weights sum to 1.0
             weights = (
                 merged.get("technical_weight", 0)
@@ -530,8 +608,9 @@ class RuntimeConfigStore:
                 + merged.get("market_sentiment_weight", 0)
                 + merged.get("cvd_weight", 0)
                 + merged.get("social_velocity_weight", 0)
+                + merged.get("screener_weight", 0)
             )
-            if abs(weights - 1.0) > 0.001:
+            if abs(weights - 1.0) > 0.02:
                 raise ValueError(
                     f"Strategy weights must sum to 1.0, got {weights:.3f}"
                 )

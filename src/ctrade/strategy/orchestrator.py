@@ -512,38 +512,34 @@ class TradingOrchestrator:
 
         # ---- Gather all intelligence sources ----
 
-        # 1. Technical score (always available) + momentum blend
+        # 1. Technical score (always available — pure TA indicators)
+        tech_score = signal.technical_score or 0.5
+
+        # 2. Screener / momentum score (CoinMarketCap top movers)
         cmc_feed = CoinMarketCapFeed.get_instance()
         momentum_score = cmc_feed.get_momentum_score(pair)
-        raw_tech_score = signal.technical_score or 0.5
 
-        # Blend momentum into technical: 60% TA + 40% momentum (when available)
-        if momentum_score is not None:
-            tech_score = 0.60 * raw_tech_score + 0.40 * momentum_score
-        else:
-            tech_score = raw_tech_score
-
-        # 2. Sentiment score (may be None if feed not ready)
+        # 3. Sentiment score (may be None if feed not ready)
         sentiment_feed = SentimentFeed.get_instance()
         sentiment_score = sentiment_feed.get_sentiment_score(pair)
 
-        # 3. On-chain score (may be None if feed not ready)
+        # 4. On-chain score (may be None if feed not ready)
         onchain_feed = OnChainFeed.get_instance()
         onchain_score = onchain_feed.get_onchain_score(pair)
 
-        # 4. Derivatives score (may be None if feed not ready or exchange unavailable)
+        # 5. Derivatives score (may be None if feed not ready or exchange unavailable)
         derivatives_feed = DerivativesFeed.get_instance()
         derivatives_score = derivatives_feed.get_derivatives_score(pair)
 
-        # 5. Market sentiment score (F&G index, L/S ratio, liquidation data)
+        # 6. Market sentiment score (F&G index, L/S ratio, liquidation data)
         mkt_sentiment_feed = MarketSentimentFeed.get_instance()
         market_sentiment_score = mkt_sentiment_feed.get_market_sentiment_score(pair)
 
-        # 6. CVD score (cumulative volume delta divergence)
+        # 7. CVD score (cumulative volume delta divergence)
         cvd_feed = CVDFeed.get_instance()
         cvd_score = cvd_feed.get_cvd_score(pair)
 
-        # 7. Social velocity score (mention spike detection)
+        # 8. Social velocity score (mention spike detection)
         social_velocity_feed = SocialVelocityFeed.get_instance()
         social_velocity_score = social_velocity_feed.get_social_velocity_score(pair)
 
@@ -551,6 +547,7 @@ class TradingOrchestrator:
 
         raw_weights = {
             "technical": strategy.get("technical_weight", 0.30),
+            "screener": strategy.get("screener_weight", 0.0),
             "sentiment": strategy.get("sentiment_weight", 0.10),
             "onchain": strategy.get("onchain_weight", 0.08),
             "derivatives": strategy.get("derivatives_weight", 0.17),
@@ -560,6 +557,8 @@ class TradingOrchestrator:
         }
 
         scores: dict[str, float] = {"technical": tech_score}
+        if momentum_score is not None:
+            scores["screener"] = momentum_score
         if sentiment_score is not None:
             scores["sentiment"] = sentiment_score
         if onchain_score is not None:

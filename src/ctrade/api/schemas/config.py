@@ -36,6 +36,10 @@ class StrategyConfigUpdate(BaseModel):
     market_sentiment_weight: float | None = Field(None, ge=0, le=1)
     cvd_weight: float | None = Field(None, ge=0, le=1)
     social_velocity_weight: float | None = Field(None, ge=0, le=1)
+    screener_weight: float | None = Field(None, ge=0, le=1)
+    screener_priority: int | None = Field(None, ge=0, le=100)
+    intelligence_priority: int | None = Field(None, ge=0, le=100)
+    signals_priority: int | None = Field(None, ge=0, le=100)
     strategy_mode: str | None = Field(None, pattern=r"^(long_only|short_only|both)$")
     short_min_1h_change_pct: float | None = Field(None, ge=0.5, le=20.0)
     risk_appetite: int | None = Field(None, ge=1, le=10)
@@ -53,6 +57,10 @@ class StrategyConfigResponse(BaseModel):
     market_sentiment_weight: float = 0.17
     cvd_weight: float = 0.10
     social_velocity_weight: float = 0.08
+    screener_weight: float = 0.0
+    screener_priority: int = 50
+    intelligence_priority: int = 50
+    signals_priority: int = 50
     strategy_mode: str = "long_only"
     short_min_1h_change_pct: float = 2.0
     risk_appetite: int = 5
