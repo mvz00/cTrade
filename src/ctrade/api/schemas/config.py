@@ -96,6 +96,8 @@ class EmailConfigUpdate(BaseModel):
     api_key: str | None = None  # raw API key — encrypted server-side
     from_address: str | None = None
     to_address: str | None = None
+    notify_on_buy: bool | None = None
+    notify_on_sell: bool | None = None
 
 
 class EmailConfigResponse(BaseModel):
@@ -103,6 +105,8 @@ class EmailConfigResponse(BaseModel):
     api_key: str = ""  # masked as "••••••" when set
     from_address: str = ""
     to_address: str = ""
+    notify_on_buy: bool = True
+    notify_on_sell: bool = True
 
 
 # ---- Exchange ----

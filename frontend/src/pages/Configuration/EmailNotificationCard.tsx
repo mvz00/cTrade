@@ -16,6 +16,8 @@ export function EmailNotificationCard() {
     api_key: '',
     from_address: '',
     to_address: '',
+    notify_on_buy: true,
+    notify_on_sell: true,
   });
 
   // Sync form with server data
@@ -26,6 +28,8 @@ export function EmailNotificationCard() {
         api_key: config.api_key,
         from_address: config.from_address,
         to_address: config.to_address,
+        notify_on_buy: config.notify_on_buy,
+        notify_on_sell: config.notify_on_sell,
       });
     }
   }, [config]);
@@ -47,12 +51,12 @@ export function EmailNotificationCard() {
       </div>
 
       <p className="text-xs text-ct-text-muted mb-4">
-        Receive email alerts when buy or sell orders are filled. Powered by MailerSend.
+        Receive email alerts when orders are filled. Powered by MailerSend.
       </p>
 
       <Toggle
         label="Enable Email"
-        description="Send email notifications for order fills"
+        description="Activate email notifications"
         checked={form.enabled}
         onChange={(checked) => setForm((f) => ({ ...f, enabled: checked }))}
       />
@@ -79,6 +83,24 @@ export function EmailNotificationCard() {
             value={form.to_address}
             onChange={(e) => setForm((f) => ({ ...f, to_address: e.target.value }))}
           />
+        </div>
+
+        <div className="pt-2 border-t border-ct-border">
+          <p className="text-xs text-ct-text-muted mb-2 font-medium">Order Notifications</p>
+          <div className="space-y-2">
+            <Toggle
+              label="Notify on Buy"
+              description="Email when any coin is bought"
+              checked={form.notify_on_buy}
+              onChange={(checked) => setForm((f) => ({ ...f, notify_on_buy: checked }))}
+            />
+            <Toggle
+              label="Notify on Sell"
+              description="Email when any coin is sold"
+              checked={form.notify_on_sell}
+              onChange={(checked) => setForm((f) => ({ ...f, notify_on_sell: checked }))}
+            />
+          </div>
         </div>
       </div>
 

@@ -228,6 +228,8 @@ export interface EmailConfig {
   api_key: string;  // masked as "••••••" when set
   from_address: string;
   to_address: string;
+  notify_on_buy: boolean;
+  notify_on_sell: boolean;
 }
 
 export interface EmailConfigUpdate {
@@ -235,6 +237,8 @@ export interface EmailConfigUpdate {
   api_key?: string;
   from_address?: string;
   to_address?: string;
+  notify_on_buy?: boolean;
+  notify_on_sell?: boolean;
 }
 
 export interface AlertConfig {

@@ -212,6 +212,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             api_key=api_key,
                             from_address=email_cfg.get("from_address", ""),
                             to_address=email_cfg["to_address"],
+                            notify_on_buy=email_cfg.get("notify_on_buy", True),
+                            notify_on_sell=email_cfg.get("notify_on_sell", True),
                         )
                     )
         except Exception as email_err:
