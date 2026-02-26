@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/cn';
+import { InfoTooltip } from './InfoTooltip';
 
 interface NumberInputProps {
   label: string;
@@ -10,6 +11,7 @@ interface NumberInputProps {
   step?: number;
   suffix?: string;
   error?: string;
+  tooltip?: string;
   className?: string;
 }
 
@@ -22,6 +24,7 @@ export function NumberInput({
   step = 1,
   suffix,
   error,
+  tooltip,
   className,
 }: NumberInputProps) {
   const [displayValue, setDisplayValue] = useState(String(value));
@@ -51,7 +54,7 @@ export function NumberInput({
   return (
     <div className={cn('space-y-1.5', className)}>
       <label htmlFor={inputId} className="block text-sm font-medium text-ct-text-muted">
-        {label}
+        {label}{tooltip && <InfoTooltip text={tooltip} />}
       </label>
       <div className="relative">
         <input

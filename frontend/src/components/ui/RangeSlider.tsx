@@ -1,4 +1,5 @@
 import { cn } from '@/lib/cn';
+import { InfoTooltip } from './InfoTooltip';
 
 interface RangeSliderProps {
   label: string;
@@ -10,6 +11,7 @@ interface RangeSliderProps {
   markers?: { value: number; label: string }[];
   /** Additional info shown below the slider */
   info?: string;
+  tooltip?: string;
   className?: string;
 }
 
@@ -35,6 +37,7 @@ export function RangeSlider({
   step = 1,
   markers,
   info,
+  tooltip,
   className,
 }: RangeSliderProps) {
   const inputId = label.toLowerCase().replace(/\s+/g, '-');
@@ -45,7 +48,7 @@ export function RangeSlider({
     <div className={cn('space-y-2', className)}>
       <div className="flex items-center justify-between">
         <label htmlFor={inputId} className="block text-sm font-medium text-ct-text-muted">
-          {label}
+          {label}{tooltip && <InfoTooltip text={tooltip} />}
         </label>
         <span className={cn('text-sm font-semibold', risk.color)}>
           {value} &mdash; {risk.label}

@@ -108,6 +108,7 @@ export function StrategyForm() {
             { value: 'short_only', label: 'Short Only (High Momentum)' },
             { value: 'both', label: 'Both (Long & Short)' },
           ]}
+          tooltip="Long Only buys and holds. Short Only profits from price drops. Both enables long and short positions."
         />
 
         {(strategyMode === 'short_only' || strategyMode === 'both') && (
@@ -119,6 +120,7 @@ export function StrategyForm() {
             max={20}
             step={0.5}
             suffix="%"
+            tooltip="Minimum 1-hour price increase required before opening a short position. Higher values are more selective."
           />
         )}
 
@@ -130,6 +132,7 @@ export function StrategyForm() {
           max={120}
           step={1}
           suffix=" min"
+          tooltip="Minimum time to hold a position before it can be sold. Prevents rapid flipping on volatile moves."
         />
 
         <div className="border-t border-ct-border pt-3 mt-3">
@@ -145,6 +148,7 @@ export function StrategyForm() {
           step={1}
           markers={RISK_MARKERS}
           info={`Entry threshold: ${(thresholds.entry * 100).toFixed(0)}% \u00b7 Exit threshold: ${(thresholds.exit * 100).toFixed(0)}%`}
+          tooltip="Controls entry and exit confidence thresholds. Higher values enter trades more easily and hold longer."
         />
 
         <div className="border-t border-ct-border pt-3 mt-3">
@@ -162,6 +166,7 @@ export function StrategyForm() {
           percentage={pct(screener, total)}
           icon={<TrendingUp size={14} />}
           description="Top movers &amp; momentum from CoinMarketCap"
+          tooltip="Weight given to top movers and momentum data from CoinMarketCap when scoring buy signals."
         />
 
         <SourcePrioritySlider
@@ -171,6 +176,7 @@ export function StrategyForm() {
           percentage={pct(intelligence, total)}
           icon={<Brain size={14} />}
           description="Sentiment, on-chain metrics, market sentiment, social velocity"
+          tooltip="Weight given to sentiment analysis, on-chain metrics, and social velocity when scoring buy signals."
         />
 
         <SourcePrioritySlider
@@ -180,6 +186,7 @@ export function StrategyForm() {
           percentage={pct(signals, total)}
           icon={<Activity size={14} />}
           description="Technical analysis, derivatives data, CVD"
+          tooltip="Weight given to technical indicators, derivatives data, and cumulative volume delta when scoring buy signals."
         />
       </div>
 

@@ -15,6 +15,7 @@ import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { Plug, Plus, Trash2, Wifi, Pencil, X, ChevronDown, ChevronRight, Power } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -43,7 +44,7 @@ function QuoteCurrencyPicker({
   return (
     <div className="space-y-1.5">
       <label className="block text-sm font-medium text-ct-text-muted">
-        Quote Currencies
+        Quote Currencies<InfoTooltip text="Only trading pairs quoted in these currencies will be considered (e.g. BTC/USDT)." />
       </label>
       <div className="flex flex-wrap gap-2">
         {QUOTE_CURRENCY_OPTIONS.map((cur) => (
@@ -481,6 +482,7 @@ export function ExchangeSection() {
                       value={editPassphrase}
                       onChange={(e) => setEditPassphrase(e.target.value)}
                       placeholder="Enter new passphrase (leave empty to keep current)"
+                      tooltip="Some exchanges like KuCoin require a passphrase in addition to API key and secret."
                     />
                   </div>
 
@@ -499,6 +501,7 @@ export function ExchangeSection() {
                       max={100}
                       step={5}
                       suffix="%"
+                      tooltip="Maximum percentage of your total portfolio that can be used on this exchange."
                     />
                     <RiskOverrideFields
                       overrides={editRiskOverrides}
@@ -565,6 +568,7 @@ export function ExchangeSection() {
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
             placeholder="Required for some exchanges (e.g., KuCoin)"
+            tooltip="Some exchanges like KuCoin require a passphrase in addition to API key and secret."
           />
 
           {/* Trading settings */}
@@ -582,6 +586,7 @@ export function ExchangeSection() {
               max={100}
               step={5}
               suffix="%"
+              tooltip="Maximum percentage of your total portfolio that can be used on this exchange."
             />
             <RiskOverrideFields
               overrides={riskOverrides}

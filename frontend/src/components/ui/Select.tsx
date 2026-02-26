@@ -1,19 +1,21 @@
 import { cn } from '@/lib/cn';
+import { InfoTooltip } from './InfoTooltip';
 
 interface SelectProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
+  tooltip?: string;
   className?: string;
 }
 
-export function Select({ label, value, onChange, options, className }: SelectProps) {
+export function Select({ label, value, onChange, options, tooltip, className }: SelectProps) {
   const selectId = label.toLowerCase().replace(/\s+/g, '-');
   return (
     <div className={cn('space-y-1.5', className)}>
       <label htmlFor={selectId} className="block text-sm font-medium text-ct-text-muted">
-        {label}
+        {label}{tooltip && <InfoTooltip text={tooltip} />}
       </label>
       <select
         id={selectId}

@@ -1,4 +1,5 @@
 import { cn } from '@/lib/cn';
+import { InfoTooltip } from './InfoTooltip';
 import type { ReactNode } from 'react';
 
 interface SourcePrioritySliderProps {
@@ -11,6 +12,7 @@ interface SourcePrioritySliderProps {
   icon?: ReactNode;
   /** Short description of what this category includes. */
   description?: string;
+  tooltip?: string;
   className?: string;
 }
 
@@ -21,6 +23,7 @@ export function SourcePrioritySlider({
   percentage,
   icon,
   description,
+  tooltip,
   className,
 }: SourcePrioritySliderProps) {
   const inputId = `source-${label.toLowerCase().replace(/\s+/g, '-')}`;
@@ -32,7 +35,7 @@ export function SourcePrioritySlider({
         <div className="flex items-center gap-2">
           {icon && <span className="text-ct-accent">{icon}</span>}
           <label htmlFor={inputId} className="block text-sm font-medium text-ct-text-muted">
-            {label}
+            {label}{tooltip && <InfoTooltip text={tooltip} />}
           </label>
         </div>
         <div className="flex items-center gap-2">

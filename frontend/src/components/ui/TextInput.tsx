@@ -1,17 +1,19 @@
 import { cn } from '@/lib/cn';
+import { InfoTooltip } from './InfoTooltip';
 import type { InputHTMLAttributes } from 'react';
 
 interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
   error?: string;
+  tooltip?: string;
 }
 
-export function TextInput({ label, error, className, id, ...props }: TextInputProps) {
+export function TextInput({ label, error, tooltip, className, id, ...props }: TextInputProps) {
   const inputId = id ?? label.toLowerCase().replace(/\s+/g, '-');
   return (
     <div className={cn('space-y-1.5', className)}>
       <label htmlFor={inputId} className="block text-sm font-medium text-ct-text-muted">
-        {label}
+        {label}{tooltip && <InfoTooltip text={tooltip} />}
       </label>
       <input
         id={inputId}

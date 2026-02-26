@@ -73,6 +73,7 @@ export function EmailNotificationCard() {
         description="Activate email notifications"
         checked={form.enabled}
         onChange={(checked) => setForm((f) => ({ ...f, enabled: checked }))}
+        tooltip="Master switch for all email notifications. Requires a valid API key and addresses."
       />
 
       <div className="mt-4 space-y-3">
@@ -82,6 +83,7 @@ export function EmailNotificationCard() {
           placeholder="mlsn.abc123..."
           value={form.api_key}
           onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
+          tooltip="Your MailerSend API key for sending transactional emails. Get one at mailersend.com."
         />
 
         <div className="grid grid-cols-2 gap-3">
@@ -90,12 +92,14 @@ export function EmailNotificationCard() {
             placeholder="alerts@yourdomain.com"
             value={form.from_address}
             onChange={(e) => setForm((f) => ({ ...f, from_address: e.target.value }))}
+            tooltip="The sender email address. Must be from a verified domain in your MailerSend account."
           />
           <TextInput
             label="To Address"
             placeholder="you@example.com"
             value={form.to_address}
             onChange={(e) => setForm((f) => ({ ...f, to_address: e.target.value }))}
+            tooltip="The email address where trade notifications will be sent."
           />
         </div>
 

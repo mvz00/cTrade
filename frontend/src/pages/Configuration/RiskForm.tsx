@@ -79,6 +79,7 @@ export function RiskForm() {
           max={100}
           step={1}
           suffix="%"
+          tooltip="Maximum percentage of your portfolio that can be allocated to a single trade."
         />
         <NumberInput
           label="Max Daily Loss"
@@ -88,6 +89,7 @@ export function RiskForm() {
           max={100}
           step={1}
           suffix="%"
+          tooltip="Trading pauses for the day if total losses exceed this percentage of your portfolio."
         />
         <NumberInput
           label="Max Drawdown"
@@ -97,6 +99,7 @@ export function RiskForm() {
           max={100}
           step={1}
           suffix="%"
+          tooltip="Trading halts completely if your portfolio drops this much from its peak value."
         />
         <div className="border-t border-ct-border pt-3 mt-3">
           <NumberInput
@@ -107,6 +110,7 @@ export function RiskForm() {
             max={50}
             step={1}
             suffix="%"
+            tooltip="Automatically sell a position if it drops this percentage below your entry price."
           />
         </div>
         <NumberInput
@@ -117,6 +121,7 @@ export function RiskForm() {
           max={100}
           step={1}
           suffix="%"
+          tooltip="Automatically sell a position once it gains this percentage above your entry price."
         />
         <NumberInput
           label="Re-buy Delay After SL"
@@ -126,6 +131,7 @@ export function RiskForm() {
           max={72}
           step={0.5}
           suffix=" hrs"
+          tooltip="Wait this long after a stop loss is triggered before buying the same asset again."
         />
       </div>
 

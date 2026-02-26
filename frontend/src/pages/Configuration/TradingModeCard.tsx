@@ -45,6 +45,7 @@ export function TradingModeCard() {
         onChange={handleToggle}
         inactiveLabel="Paper"
         activeLabel="Live"
+        tooltip="Paper mode simulates trades with virtual funds. Live mode executes real trades on your connected exchange."
       />
 
       {confirming && (

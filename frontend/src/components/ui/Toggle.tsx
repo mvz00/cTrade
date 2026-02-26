@@ -1,4 +1,5 @@
 import { cn } from '@/lib/cn';
+import { InfoTooltip } from './InfoTooltip';
 
 interface ToggleProps {
   label: string;
@@ -7,6 +8,7 @@ interface ToggleProps {
   onChange: (checked: boolean) => void;
   activeLabel?: string;
   inactiveLabel?: string;
+  tooltip?: string;
 }
 
 export function Toggle({
@@ -16,11 +18,12 @@ export function Toggle({
   onChange,
   activeLabel,
   inactiveLabel,
+  tooltip,
 }: ToggleProps) {
   return (
     <div className="flex items-center justify-between py-2">
       <div>
-        <p className="text-sm font-medium text-ct-text">{label}</p>
+        <p className="text-sm font-medium text-ct-text">{label}{tooltip && <InfoTooltip text={tooltip} />}</p>
         {description && <p className="text-xs text-ct-text-dim mt-0.5">{description}</p>}
       </div>
       <div className="flex items-center gap-2">
