@@ -54,6 +54,10 @@ class LiveEngine:
         self._data_lock = threading.Lock()
         # Cached real exchange prices for open positions (updated async)
         self._live_prices: dict[str, float] = {}
+        # Pairs that the exchange cannot trade (learned at runtime).
+        # Prevents repeated API calls for coins that return errors like
+        # "Market trades for this coin are unavailable at present".
+        self._untradeable_pairs: set[str] = set()
 
     @classmethod
     def get_instance(cls) -> LiveEngine:
@@ -193,6 +197,19 @@ class LiveEngine:
             price=Decimal(str(price)) if price else None,
             status=OrderStatus.PENDING,
         )
+
+        # Fast-reject pairs known to be untradeable on this exchange
+        if symbol in self._untradeable_pairs:
+            order.status = OrderStatus.REJECTED
+            order.error_message = (
+                f"{symbol} is not available for trading on {exchange_name} "
+                f"(previously rejected by exchange)"
+            )
+            with self._data_lock:
+                self._orders.append(order)
+            logger.info("Skipped untradeable pair %s on %s", symbol, exchange_name)
+            fire_and_forget(self._persist_order_async(order))
+            return order
 
         # Safety: enforce max order size using REAL exchange price
         try:
@@ -451,7 +468,18 @@ class LiveEngine:
             order.error_message = f"Exchange error: {e}"
             with self._data_lock:
                 self._orders.append(order)
-            logger.error("LIVE order failed for %s: %s", symbol, e)
+
+            # Learn: if the exchange says this coin can't be traded, add it
+            # to the blocklist so we don't waste API calls on future ticks.
+            err_lower = str(e).lower()
+            if "unavailable" in err_lower or "not supported" in err_lower:
+                self._untradeable_pairs.add(symbol)
+                logger.warning(
+                    "Added %s to untradeable pairs list — exchange: %s",
+                    symbol, e,
+                )
+            else:
+                logger.error("LIVE order failed for %s: %s", symbol, e)
         finally:
             if ccxt_exchange:
                 try:
