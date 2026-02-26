@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---- Trading Mode ----
@@ -46,6 +46,22 @@ class StrategyConfigUpdate(BaseModel):
     entry_confidence_threshold: float | None = Field(None, ge=0, le=1)
     exit_confidence_threshold: float | None = Field(None, ge=0, le=1)
     min_hold_minutes: int | None = Field(None, ge=0, le=120)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, data: dict) -> dict:  # type: ignore[override]
+        """Accept legacy field names/values from cached clients."""
+        if isinstance(data, dict):
+            # Remap old field name
+            if "short_min_1h_change_pct" in data and "quicktrade_min_1h_change_pct" not in data:
+                data["quicktrade_min_1h_change_pct"] = data.pop("short_min_1h_change_pct")
+            # Remap old strategy mode values
+            mode = data.get("strategy_mode")
+            if mode == "short_only":
+                data["strategy_mode"] = "quicktrade"
+            elif mode == "both":
+                data["strategy_mode"] = "long_only"
+        return data
 
 
 class StrategyConfigResponse(BaseModel):
