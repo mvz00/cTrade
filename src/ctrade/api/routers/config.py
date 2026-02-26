@@ -143,9 +143,38 @@ async def update_email_config(body: EmailConfigUpdate) -> EmailConfigResponse:
 
     If api_key is ``"••••••"`` (the masked placeholder), the existing
     encrypted key is preserved.  Send a new plaintext value to change it.
+
+    The email channel is hot-reloaded so changes take effect immediately
+    without requiring an app restart.
     """
+    store = await _store()
     updates = body.model_dump(exclude_none=True)
-    updated = (await _store()).update_email(updates)
+    updated = store.update_email(updates)
+
+    # Hot-reload: re-register (or unregister) the email channel so
+    # config changes take effect without an app restart.
+    try:
+        from ctrade.notifications.channels.router import NotificationRouter
+        router = NotificationRouter.get_instance()
+
+        if updated.get("enabled"):
+            api_key = store.get_email_api_key_decrypted()
+            to_address = updated.get("to_address", "")
+            if api_key and to_address:
+                from ctrade.notifications.channels.email import EmailChannel
+                router.register(
+                    EmailChannel(
+                        api_key=api_key,
+                        from_address=updated.get("from_address", ""),
+                        to_address=to_address,
+                        notify_on_buy=updated.get("notify_on_buy", True),
+                        notify_on_sell=updated.get("notify_on_sell", True),
+                    )
+                )
+        else:
+            router.unregister("email")
+    except Exception:
+        pass  # Non-fatal — don't break config save
 
     # Return masked response
     has_key = bool(updated.get("api_key_encrypted"))
