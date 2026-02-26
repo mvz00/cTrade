@@ -1396,8 +1396,15 @@ class MarketDataProvider:
                             ex_name,
                         )
 
+                    # Extract cash/fiat currencies from balances (e.g. AUD)
+                    cash_bal_usd: dict[str, float] = {}
+                    for cur, amt in balances.items():
+                        if cur in _CASH_CURRENCIES and amt > 0:
+                            rate = _FIAT_TO_USD.get(cur, 1.0)
+                            cash_bal_usd[cur] = round(amt * rate, 2)
+
                     portfolio: dict[str, Any] = {
-                        "cash_balance": {},
+                        "cash_balance": cash_bal_usd,
                         "total_value_usd": round(total_usd, 2),
                         "positions_value": round(total_usd, 2),
                         "unrealized_pnl": 0.0,
