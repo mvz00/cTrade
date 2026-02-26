@@ -72,6 +72,12 @@ class StrategySettings(BaseModel):
     market_sentiment_weight: float = 0.17
     cvd_weight: float = 0.10
     social_velocity_weight: float = 0.08
+    screener_weight: float = 0.0
+    # Source-priority sliders (0-100).  Normalised to proportions that
+    # drive the individual weights above.
+    screener_priority: int = 50
+    intelligence_priority: int = 50
+    signals_priority: int = 50
     strategy_mode: str = "long_only"
     short_min_1h_change_pct: float = 2.0
     risk_appetite: int = 5
