@@ -110,13 +110,9 @@ class RuntimeConfigStore:
         self._feed_credentials: dict[str, dict[str, bytes]] = {}
         self._email: dict[str, Any] = {
             "enabled": False,
-            "smtp_host": "",
-            "smtp_port": 587,
-            "username": "",
-            "password_encrypted": "",  # base64-encoded encrypted bytes
+            "api_key_encrypted": "",  # base64-encoded encrypted MailerSend API key
             "from_address": "",
             "to_address": "",
-            "use_tls": True,
         }
         self._data_lock = threading.Lock()
         self._hydrated: bool = False
@@ -643,39 +639,45 @@ class RuntimeConfigStore:
     def update_email(self, updates: dict[str, Any]) -> dict[str, Any]:
         """Update email notification settings.
 
-        If ``password`` is provided in updates, it is encrypted via Vault
-        and stored as ``password_encrypted``.  The raw password is never
-        persisted.
+        If ``api_key`` is provided in updates, it is encrypted via Vault
+        and stored as ``api_key_encrypted``.  The raw key is never persisted.
         """
-        raw_password = updates.pop("password", None)
-        if raw_password and raw_password != "\u2022\u2022\u2022\u2022\u2022\u2022":
-            # Encrypt the password before storage
+        raw_key = updates.pop("api_key", None)
+        if raw_key and raw_key != "\u2022\u2022\u2022\u2022\u2022\u2022":
+            # Encrypt the API key before storage
             try:
                 from ctrade.settings import get_settings
                 key = get_settings().encryption_key.get_secret_value()
                 if key:
                     vault = Vault(key)
-                    encrypted = vault.encrypt(raw_password)
-                    updates["password_encrypted"] = base64.b64encode(encrypted).decode()
+                    encrypted = vault.encrypt(raw_key)
+                    updates["api_key_encrypted"] = base64.b64encode(encrypted).decode()
                 else:
-                    logger.warning("No encryption key — email password stored as plaintext")
-                    updates["password_encrypted"] = base64.b64encode(
-                        raw_password.encode()
+                    logger.warning("No encryption key — MailerSend API key stored as plaintext")
+                    updates["api_key_encrypted"] = base64.b64encode(
+                        raw_key.encode()
                     ).decode()
             except Exception:
-                logger.warning("Failed to encrypt email password", exc_info=True)
+                logger.warning("Failed to encrypt MailerSend API key", exc_info=True)
+
+        # Strip any legacy SMTP fields that may linger in old configs
+        for legacy_key in ("smtp_host", "smtp_port", "username", "password_encrypted", "use_tls", "password"):
+            updates.pop(legacy_key, None)
 
         with self._data_lock:
+            # Also clean legacy SMTP fields from the stored dict
+            for legacy_key in ("smtp_host", "smtp_port", "username", "password_encrypted", "use_tls"):
+                self._email.pop(legacy_key, None)
             self._email.update(updates)
             result = dict(self._email)
         self._save_to_disk()
         self._save_to_db()
         return result
 
-    def get_email_password_decrypted(self) -> str:
-        """Return the decrypted SMTP password, or empty string."""
+    def get_email_api_key_decrypted(self) -> str:
+        """Return the decrypted MailerSend API key, or empty string."""
         with self._data_lock:
-            enc_b64 = self._email.get("password_encrypted", "")
+            enc_b64 = self._email.get("api_key_encrypted", "")
         if not enc_b64:
             return ""
         try:
@@ -686,7 +688,7 @@ class RuntimeConfigStore:
             vault = Vault(key)
             return vault.decrypt(base64.b64decode(enc_b64))
         except Exception:
-            logger.warning("Failed to decrypt email password", exc_info=True)
+            logger.warning("Failed to decrypt MailerSend API key", exc_info=True)
             return ""
 
     def get_effective_risk(self, exchange_id: str | None = None) -> dict[str, Any]:

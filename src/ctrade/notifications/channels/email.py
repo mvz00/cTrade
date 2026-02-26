@@ -1,15 +1,15 @@
-"""Email (SMTP) notification channel."""
+"""Email notification channel via MailerSend API."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Any
 
+import aiohttp
+
 logger = logging.getLogger(__name__)
+
+_MAILERSEND_URL = "https://api.mailersend.com/v1/email"
 
 # Severity → emoji + color for HTML email
 _SEVERITY_STYLE = {
@@ -21,33 +21,26 @@ _SEVERITY_STYLE = {
 
 
 class EmailChannel:
-    """Send notifications via SMTP email.
+    """Send notifications via MailerSend transactional email API.
 
     Implements the ``NotificationChannel`` protocol:
       ``async send(message, severity, metadata) -> bool``
 
-    Uses Python's built-in ``smtplib`` via ``asyncio.to_thread()``
-    to avoid blocking the event loop.
+    Uses ``aiohttp`` for non-blocking HTTP requests.
     """
 
     def __init__(
         self,
-        smtp_host: str,
-        smtp_port: int,
-        username: str,
-        password: str,
+        api_key: str,
         from_address: str,
         to_address: str,
-        use_tls: bool = True,
+        from_name: str = "cTrade",
     ) -> None:
         self.name = "email"
-        self._smtp_host = smtp_host
-        self._smtp_port = smtp_port
-        self._username = username
-        self._password = password
+        self._api_key = api_key
         self._from_address = from_address
         self._to_address = to_address
-        self._use_tls = use_tls
+        self._from_name = from_name
 
     async def send(
         self,
@@ -55,44 +48,43 @@ class EmailChannel:
         severity: str = "info",
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Send an email notification via SMTP (runs in thread pool)."""
+        """Send an email notification via MailerSend API."""
         try:
             meta = metadata or {}
             subject = self._build_subject(message, severity, meta)
             html_body = self._build_html(message, severity, meta)
 
-            msg = MIMEMultipart("alternative")
-            msg["From"] = self._from_address
-            msg["To"] = self._to_address
-            msg["Subject"] = subject
+            payload = {
+                "from": {
+                    "email": self._from_address,
+                    "name": self._from_name,
+                },
+                "to": [{"email": self._to_address}],
+                "subject": subject,
+                "text": message,
+                "html": html_body,
+            }
 
-            # Plain text fallback
-            msg.attach(MIMEText(message, "plain"))
-            # HTML version
-            msg.attach(MIMEText(html_body, "html"))
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
 
-            await asyncio.to_thread(self._send_smtp, msg)
-            logger.debug("Email notification sent: %s", subject)
-            return True
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    _MAILERSEND_URL, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status == 202:
+                        logger.debug("Email notification sent: %s", subject)
+                        return True
+                    body = await resp.text()
+                    logger.warning(
+                        "MailerSend API returned %d: %s", resp.status, body,
+                    )
+                    return False
         except Exception:
             logger.warning("Failed to send email notification", exc_info=True)
             return False
-
-    def _send_smtp(self, msg: MIMEMultipart) -> None:
-        """Synchronous SMTP send (called in thread pool)."""
-        if self._use_tls:
-            with smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                if self._username and self._password:
-                    server.login(self._username, self._password)
-                server.sendmail(self._from_address, [self._to_address], msg.as_string())
-        else:
-            with smtplib.SMTP(self._smtp_host, self._smtp_port, timeout=15) as server:
-                if self._username and self._password:
-                    server.login(self._username, self._password)
-                server.sendmail(self._from_address, [self._to_address], msg.as_string())
 
     @staticmethod
     def _build_subject(

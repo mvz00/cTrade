@@ -195,26 +195,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             )
 
         # Email channel — configured via dashboard UI (RuntimeConfigStore)
+        # Uses MailerSend transactional email API.
         try:
             from ctrade.core.config_store import RuntimeConfigStore
             if RuntimeConfigStore.is_initialized():
                 email_cfg = RuntimeConfigStore.get().get_email()
+                api_key = RuntimeConfigStore.get().get_email_api_key_decrypted()
                 if (
                     email_cfg.get("enabled")
-                    and email_cfg.get("smtp_host")
+                    and api_key
                     and email_cfg.get("to_address")
                 ):
                     from ctrade.notifications.channels.email import EmailChannel
-                    smtp_password = RuntimeConfigStore.get().get_email_password_decrypted()
                     notification_router.register(
                         EmailChannel(
-                            smtp_host=email_cfg["smtp_host"],
-                            smtp_port=email_cfg.get("smtp_port", 587),
-                            username=email_cfg.get("username", ""),
-                            password=smtp_password,
+                            api_key=api_key,
                             from_address=email_cfg.get("from_address", ""),
                             to_address=email_cfg["to_address"],
-                            use_tls=email_cfg.get("use_tls", True),
                         )
                     )
         except Exception as email_err:
