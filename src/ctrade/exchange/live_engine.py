@@ -515,13 +515,18 @@ class LiveEngine:
             with self._data_lock:
                 self._orders.append(order)
 
-            # Learn: if the exchange says this coin can't be traded, add it
-            # to the blocklist so we don't waste API calls on future ticks.
+            # Learn: if the exchange says this coin can't be traded, remove
+            # it from the watchlist so we never attempt it again.
             err_lower = str(e).lower()
-            if "unavailable" in err_lower or "not supported" in err_lower:
+            _UNTRADEABLE_PHRASES = (
+                "unavailable", "not supported", "not found",
+                "not available", "delisted", "suspended",
+            )
+            if any(phrase in err_lower for phrase in _UNTRADEABLE_PHRASES):
                 self._untradeable_pairs.add(symbol)
+                self.remove_watched_pair(symbol)
                 logger.warning(
-                    "Added %s to untradeable pairs list — exchange: %s",
+                    "Removed %s from watchlist — exchange: %s",
                     symbol, e,
                 )
             else:
