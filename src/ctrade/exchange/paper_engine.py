@@ -143,6 +143,7 @@ class PaperEngine:
         try:
             from ctrade.notifications.channels.router import NotificationRouter
             router = NotificationRouter.get_instance()
+            router.ensure_email_channel()
             if not router.list_channels():
                 return
             side = order.side.value if hasattr(order.side, "value") else str(order.side)
