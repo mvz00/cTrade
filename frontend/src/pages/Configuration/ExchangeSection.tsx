@@ -468,6 +468,7 @@ export function ExchangeSection() {
                       value={editApiKey}
                       onChange={(e) => setEditApiKey(e.target.value)}
                       placeholder="Enter new API key to replace existing"
+                      tooltip="Your exchange API key. Create one in your exchange account settings with trading permissions enabled."
                     />
                     <TextInput
                       label="API Secret"
@@ -475,6 +476,7 @@ export function ExchangeSection() {
                       value={editApiSecret}
                       onChange={(e) => setEditApiSecret(e.target.value)}
                       placeholder="Enter new API secret to replace existing"
+                      tooltip="Your exchange API secret. This is shown only once when creating the key — store it securely."
                     />
                     <TextInput
                       label="Passphrase (optional)"
@@ -544,6 +546,7 @@ export function ExchangeSection() {
               value={name}
               onChange={setName}
               options={[{ value: '', label: 'Select an exchange...' }, ...exchangeOptions]}
+              tooltip="The exchange platform to connect. Each exchange must be added separately with its own API credentials."
             />
           ) : (
             <p className="text-sm text-ct-text-dim">Loading available exchanges...</p>
@@ -554,6 +557,7 @@ export function ExchangeSection() {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="Enter your API key"
+            tooltip="Your exchange API key. Create one in your exchange account settings with trading permissions enabled."
           />
           <TextInput
             label="API Secret"
@@ -561,6 +565,7 @@ export function ExchangeSection() {
             value={apiSecret}
             onChange={(e) => setApiSecret(e.target.value)}
             placeholder="Enter your API secret"
+            tooltip="Your exchange API secret. This is shown only once when creating the key — store it securely."
           />
           <TextInput
             label="Passphrase (optional)"

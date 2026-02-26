@@ -111,12 +111,14 @@ export function EmailNotificationCard() {
               description="Email when any coin is bought"
               checked={form.notify_on_buy}
               onChange={(checked) => setForm((f) => ({ ...f, notify_on_buy: checked }))}
+              tooltip="Receive an email each time the bot opens a new position or adds to an existing one."
             />
             <Toggle
               label="Notify on Sell"
               description="Email when any coin is sold"
               checked={form.notify_on_sell}
               onChange={(checked) => setForm((f) => ({ ...f, notify_on_sell: checked }))}
+              tooltip="Receive an email each time a position is closed, whether by take profit, stop loss, or manual sell."
             />
           </div>
         </div>
