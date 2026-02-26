@@ -49,7 +49,7 @@ class PaperEngine:
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, initial_balance: Decimal = INITIAL_BALANCE) -> None:
-        self._cash: dict[str, Decimal] = {"USDT": initial_balance}
+        self._cash: dict[str, Decimal] = {self._detect_quote_currency(): initial_balance}
         self._orders: list[Order] = []
         self._positions: list[Position] = []
         self._equity_curve: list[EquityPoint] = []
@@ -78,6 +78,25 @@ class PaperEngine:
         with cls._lock:
             cls._instance = None
 
+    @staticmethod
+    def _detect_quote_currency() -> str:
+        """Detect the primary quote currency from configured exchanges.
+
+        Returns "AUD" for CoinSpot, "USDT" as default fallback.
+        Called during __init__ and reset_to_defaults so the paper engine
+        starts with cash in the correct currency for the user's exchange.
+        """
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+            if RuntimeConfigStore.is_initialized():
+                for ex in RuntimeConfigStore.get().list_exchanges():
+                    name = ex.get("name", "").lower()
+                    if name == "coinspot":
+                        return "AUD"
+        except Exception:
+            pass
+        return "USDT"
+
     async def reset_to_defaults(self) -> None:
         """Wipe all paper-trading state and restore $10K balance.
 
@@ -86,7 +105,7 @@ class PaperEngine:
         state persists across restarts.
         """
         with self._data_lock:
-            self._cash = {"USDT": INITIAL_BALANCE}
+            self._cash = {self._detect_quote_currency(): INITIAL_BALANCE}
             self._orders.clear()
             self._positions.clear()
             self._equity_curve.clear()
@@ -249,6 +268,22 @@ class PaperEngine:
                 # Check balance
                 quote = symbol.split("/")[1] if "/" in symbol else "USDT"
                 base = symbol.split("/")[0] if "/" in symbol else symbol
+
+                # Auto-seed: if the engine has only USDT (fresh start or
+                # reset) but trades need a different quote currency (e.g.
+                # AUD for CoinSpot), transfer the USDT balance into the
+                # required quote currency so paper trading works for any
+                # exchange without manual configuration.
+                if quote not in self._cash or self._cash.get(quote, Decimal("0")) == 0:
+                    usdt = self._cash.get("USDT", Decimal("0"))
+                    positive_currencies = [k for k, v in self._cash.items() if v > 0]
+                    if usdt > 0 and positive_currencies == ["USDT"]:
+                        self._cash[quote] = usdt
+                        self._cash["USDT"] = Decimal("0")
+                        logger.info(
+                            "Paper engine: auto-converted USDT balance to %s for %s trading",
+                            quote, quote,
+                        )
 
                 if side == "buy":
                     available = self._cash.get(quote, Decimal("0"))
