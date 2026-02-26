@@ -83,7 +83,12 @@ class LiveEngine:
             pass  # EventBus not running yet — swallow silently
 
     @staticmethod
-    async def _notify_order_fill(order: Any, mode: str = "live") -> None:
+    async def _notify_order_fill(
+        order: Any,
+        mode: str = "live",
+        justification: str = "",
+        outlook: dict[str, float] | None = None,
+    ) -> None:
         """Send order-fill notification to all registered channels."""
         try:
             from ctrade.notifications.channels.router import NotificationRouter
@@ -96,18 +101,25 @@ class LiveEngine:
             fee = float(order.fee) if order.fee else 0
             symbol = order.pair_symbol
             message = f"{side.upper()} {qty:.6g} {symbol} filled @ {price:.8g} ({mode} mode)"
+            meta: dict[str, Any] = {
+                "title": f"Order Filled: {side.upper()} {symbol}",
+                "pair": symbol,
+                "side": side.upper(),
+                "quantity": qty,
+                "price": price,
+                "fee": fee,
+                "mode": mode,
+            }
+            if justification:
+                meta["justification"] = justification
+            if outlook:
+                meta["outlook_1h"] = outlook.get("outlook_1h")
+                meta["outlook_24h"] = outlook.get("outlook_24h")
+                meta["outlook_7d"] = outlook.get("outlook_7d")
             await router.dispatch(
                 message=message,
                 severity="success",
-                metadata={
-                    "title": f"Order Filled: {side.upper()} {symbol}",
-                    "pair": symbol,
-                    "side": side.upper(),
-                    "quantity": qty,
-                    "price": price,
-                    "fee": fee,
-                    "mode": mode,
-                },
+                metadata=meta,
             )
         except Exception:
             pass  # Non-fatal — don't break order flow
@@ -177,6 +189,7 @@ class LiveEngine:
         take_profit: float | None = None,
         exchange_name: str = "",
         exchange_id: str | None = None,
+        outlook: dict[str, float] | None = None,
     ) -> Order:
         """Place a real order on the exchange via ccxt."""
         from ctrade.core.config_store import RuntimeConfigStore
@@ -434,7 +447,7 @@ class LiveEngine:
 
             with self._data_lock:
                 self._orders.append(order)
-                self._update_positions(order, strategy_name, justification, stop_loss, take_profit)
+                self._update_positions(order, strategy_name, justification, stop_loss, take_profit, outlook=outlook)
                 self._record_equity_snapshot()
 
             # Publish event
@@ -450,7 +463,9 @@ class LiveEngine:
             })
 
             # Notify all channels (email, Discord, Telegram)
-            fire_and_forget(self._notify_order_fill(order, mode="live"))
+            fire_and_forget(self._notify_order_fill(
+                order, mode="live", justification=justification, outlook=outlook,
+            ))
 
             logger.info(
                 "LIVE %s %s: qty=%.6f @ %.4f (fee=%.4f %s) exchange_id=%s",
@@ -491,8 +506,9 @@ class LiveEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None) -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None, outlook: dict[str, float] | None = None) -> None:
         """Update positions after a filled order (must hold _data_lock)."""
+        _outlook = outlook or {}
         if order.side == OrderSide.BUY:
             existing = self._find_open_position(order.pair_symbol, PositionSide.SHORT)
             if existing:
@@ -513,6 +529,9 @@ class LiveEngine:
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
                     justification=justification,
+                    outlook_1h=_outlook.get("outlook_1h"),
+                    outlook_24h=_outlook.get("outlook_24h"),
+                    outlook_7d=_outlook.get("outlook_7d"),
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -545,6 +564,9 @@ class LiveEngine:
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
                     justification=justification,
+                    outlook_1h=_outlook.get("outlook_1h"),
+                    outlook_24h=_outlook.get("outlook_24h"),
+                    outlook_7d=_outlook.get("outlook_7d"),
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -893,4 +915,7 @@ class LiveEngine:
             "opened_at": p.opened_at.isoformat(),
             "closed_at": p.closed_at.isoformat() if p.closed_at else None,
             "justification": p.justification,
+            "outlook_1h": p.outlook_1h,
+            "outlook_24h": p.outlook_24h,
+            "outlook_7d": p.outlook_7d,
         }

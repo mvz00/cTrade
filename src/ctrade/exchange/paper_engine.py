@@ -133,7 +133,12 @@ class PaperEngine:
             pass  # EventBus not running yet — swallow silently
 
     @staticmethod
-    async def _notify_order_fill(order: Any, mode: str = "paper") -> None:
+    async def _notify_order_fill(
+        order: Any,
+        mode: str = "paper",
+        justification: str = "",
+        outlook: dict[str, float] | None = None,
+    ) -> None:
         """Send order-fill notification to all registered channels."""
         try:
             from ctrade.notifications.channels.router import NotificationRouter
@@ -146,18 +151,25 @@ class PaperEngine:
             fee = float(order.fee) if order.fee else 0
             symbol = order.pair_symbol
             message = f"{side.upper()} {qty:.6g} {symbol} filled @ {price:.8g} ({mode} mode)"
+            meta: dict[str, Any] = {
+                "title": f"Order Filled: {side.upper()} {symbol}",
+                "pair": symbol,
+                "side": side.upper(),
+                "quantity": qty,
+                "price": price,
+                "fee": fee,
+                "mode": mode,
+            }
+            if justification:
+                meta["justification"] = justification
+            if outlook:
+                meta["outlook_1h"] = outlook.get("outlook_1h")
+                meta["outlook_24h"] = outlook.get("outlook_24h")
+                meta["outlook_7d"] = outlook.get("outlook_7d")
             await router.dispatch(
                 message=message,
                 severity="success",
-                metadata={
-                    "title": f"Order Filled: {side.upper()} {symbol}",
-                    "pair": symbol,
-                    "side": side.upper(),
-                    "quantity": qty,
-                    "price": price,
-                    "fee": fee,
-                    "mode": mode,
-                },
+                metadata=meta,
             )
         except Exception:
             pass  # Non-fatal — don't break order flow
@@ -205,6 +217,7 @@ class PaperEngine:
         take_profit: float | None = None,
         exchange_name: str = "paper",
         exchange_id: str | None = None,
+        outlook: dict[str, float] | None = None,
     ) -> Order:
         """Place an order. Market orders fill immediately."""
         from ctrade.exchange.market_data import MarketDataProvider
@@ -281,7 +294,7 @@ class PaperEngine:
                 self._orders.append(order)
 
                 # Update positions
-                self._update_positions(order, strategy_name, justification, stop_loss, take_profit, exchange_name)
+                self._update_positions(order, strategy_name, justification, stop_loss, take_profit, exchange_name, outlook=outlook)
                 # Record equity
                 self._record_equity()
 
@@ -296,7 +309,9 @@ class PaperEngine:
                 })
 
                 # Notify all channels (email, Discord, Telegram)
-                fire_and_forget(self._notify_order_fill(order, mode="paper"))
+                fire_and_forget(self._notify_order_fill(
+                    order, mode="paper", justification=justification, outlook=outlook,
+                ))
 
             else:
                 # Limit/stop orders stay pending
@@ -306,8 +321,9 @@ class PaperEngine:
         fire_and_forget(self._persist_order_async(order))
         return order
 
-    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None, exchange_name: str = "paper") -> None:
+    def _update_positions(self, order: Order, strategy_name: str = "", justification: str = "", stop_loss: float | None = None, take_profit: float | None = None, exchange_name: str = "paper", outlook: dict[str, float] | None = None) -> None:
         """Update positions after a filled order."""
+        _outlook = outlook or {}
         if order.side == OrderSide.BUY:
             # Check for existing short position to close
             existing = self._find_open_position(order.pair_symbol, PositionSide.SHORT)
@@ -330,6 +346,9 @@ class PaperEngine:
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
                     justification=justification,
+                    outlook_1h=_outlook.get("outlook_1h"),
+                    outlook_24h=_outlook.get("outlook_24h"),
+                    outlook_7d=_outlook.get("outlook_7d"),
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -361,6 +380,9 @@ class PaperEngine:
                     strategy_name=strategy_name,
                     entry_signal_id=order.signal_id,
                     justification=justification,
+                    outlook_1h=_outlook.get("outlook_1h"),
+                    outlook_24h=_outlook.get("outlook_24h"),
+                    outlook_7d=_outlook.get("outlook_7d"),
                 )
                 self._positions.append(pos)
                 fire_and_forget(self._persist_position_async(pos))
@@ -686,4 +708,7 @@ class PaperEngine:
             "opened_at": p.opened_at.isoformat(),
             "closed_at": p.closed_at.isoformat() if p.closed_at else None,
             "justification": p.justification,
+            "outlook_1h": p.outlook_1h,
+            "outlook_24h": p.outlook_24h,
+            "outlook_7d": p.outlook_7d,
         }

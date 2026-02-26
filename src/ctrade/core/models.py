@@ -114,6 +114,9 @@ class Position:
     opened_at: datetime = field(default_factory=_utc_now)
     closed_at: datetime | None = None
     justification: str = ""  # Human-readable trade rationale
+    outlook_1h: float | None = None   # 0-1 signal outlook at entry time
+    outlook_24h: float | None = None
+    outlook_7d: float | None = None
 
 
 @dataclass(frozen=True)
