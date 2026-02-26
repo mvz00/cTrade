@@ -159,12 +159,20 @@ class MarketDataProvider:
 
     _TICKER_CACHE_TTL = 300  # 5 minutes — shared across snapshot task & dashboard
 
+    _CCXT_CACHE_TTL = 120  # 2 minutes — reuse ccxt instance across candle fetches
+
     def __init__(self) -> None:
         self._sim_prices: dict[str, float] = dict(_SEED_PRICES)
         self._sim_rng = random.Random(42)
         self._data_lock = threading.Lock()
         self._cached_exchange_pairs: list[str] | None = None
         self._ticker_cache: dict[str, tuple[Ticker, float]] = {}  # key → (ticker, epoch); "symbol" or "symbol:exchange_id"
+        # Cached ccxt exchange instance — avoids creating (and calling
+        # load_markets()) on every single candle fetch.  With 100+ pairs
+        # this saves ~100 load_markets() calls per tick.
+        self._ccxt_instance: Any | None = None
+        self._ccxt_instance_ts: float = 0.0
+        self._ccxt_exchange_id: str | None = None  # which exchange the cached instance belongs to
 
     @classmethod
     def get_instance(cls) -> MarketDataProvider:
@@ -264,8 +272,14 @@ class MarketDataProvider:
         return list(_SEED_PRICES.keys())
 
     def clear_pairs_cache(self) -> None:
-        """Clear the cached exchange pairs (e.g. after exchange config change)."""
+        """Clear the cached exchange pairs (e.g. after exchange config change).
+
+        Also invalidates the cached ccxt exchange instance so the next
+        candle fetch picks up new credentials / quote currency settings.
+        """
         self._cached_exchange_pairs = None
+        # Force ccxt instance rebuild on next use
+        self._ccxt_instance_ts = 0.0
 
     def clear_ticker_cache(self) -> None:
         """Clear the cached ticker prices (e.g. after exchange toggle)."""
@@ -611,11 +625,41 @@ class MarketDataProvider:
             logger.debug("CoinSpot public price API failed: %s", e)
             return None
 
+    async def _get_cached_ccxt_exchange(self, exchange_id: str | None = None) -> Any | None:
+        """Return a cached ccxt exchange instance, creating one if needed.
+
+        Reuses the same instance for up to ``_CCXT_CACHE_TTL`` seconds,
+        avoiding the expensive ``load_markets()`` call on every candle fetch.
+        With 100+ watched pairs this saves ~100 network round-trips per tick.
+        """
+        now = time.time()
+        if (
+            self._ccxt_instance is not None
+            and (now - self._ccxt_instance_ts) < self._CCXT_CACHE_TTL
+            and self._ccxt_exchange_id == exchange_id
+        ):
+            return self._ccxt_instance
+
+        # Close stale instance
+        if self._ccxt_instance is not None:
+            try:
+                await self._ccxt_instance.close()
+            except Exception:
+                pass
+            self._ccxt_instance = None
+
+        instance = await self._create_ccxt_exchange(exchange_id)
+        if instance is not None:
+            self._ccxt_instance = instance
+            self._ccxt_instance_ts = now
+            self._ccxt_exchange_id = exchange_id
+        return instance
+
     async def _try_ccxt_candles(
         self, symbol: str, timeframe: str, limit: int
     ) -> list[Candle] | None:
         """Try to fetch candles from a configured exchange."""
-        exchange = await self._create_ccxt_exchange()
+        exchange = await self._get_cached_ccxt_exchange()
         if not exchange:
             return None
         try:
@@ -637,8 +681,6 @@ class MarketDataProvider:
         except Exception as e:
             logger.info("ccxt candle fetch failed for %s: %s — will try Binance public fallback", symbol, e)
             return None
-        finally:
-            await exchange.close()
 
     async def _try_binance_public_candles(
         self, symbol: str, timeframe: str, limit: int

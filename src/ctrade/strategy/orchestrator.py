@@ -340,6 +340,10 @@ class TradingOrchestrator:
 
         pairs = engine.get_watched_pairs()
         if not pairs:
+            self._log_activity(
+                "info", "ALL",
+                "No watched pairs — add pairs on the Trading page to start analysis",
+            )
             return
 
         # Refresh real exchange prices for live-mode PnL display
@@ -384,6 +388,8 @@ class TradingOrchestrator:
         short_min_1h_change_pct = strategy.get("short_min_1h_change_pct", 2.0)
         min_hold_minutes = strategy.get("min_hold_minutes", 15)
 
+        processed = 0
+        errors = 0
         for pair in ranked_pairs:
             # Route pair to its exchange based on quote currency
             pair_ex = store.find_exchange_for_pair(pair) if store else None
@@ -412,8 +418,18 @@ class TradingOrchestrator:
                     min_hold_minutes=min_hold_minutes,
                     sl_rebuy_delay_hours=p_sl_rebuy,
                 )
+                processed += 1
             except Exception:
+                errors += 1
                 logger.exception("Error processing pair %s", pair)
+
+        # Log tick summary (replaces the previous summary if one exists
+        # to avoid flooding the activity log with meta entries).
+        mode_label = "live" if isinstance(engine, LiveEngine) else "paper"
+        summary = f"Tick #{self._tick_count + 1} complete — {processed}/{len(ranked_pairs)} pairs analyzed ({mode_label})"
+        if errors:
+            summary += f", {errors} errors"
+        self._log_activity("info", "ALL", summary)
 
     def _rank_pairs_by_momentum(self, pairs: list[str]) -> list[str]:
         """Rank trading pairs by absolute momentum — biggest movers first.
