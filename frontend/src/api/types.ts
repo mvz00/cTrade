@@ -490,6 +490,18 @@ export interface ConnectionCredentialsRequest {
   credentials: Record<string, string>;
 }
 
+// ---- Position Candles (price chart) ----
+
+export interface CandlePoint {
+  time: string;
+  close: number;
+}
+
+export interface SymbolCandleSeries {
+  symbol: string;
+  candles: CandlePoint[];
+}
+
 // ---- Portfolio History (per-exchange equity curve) ----
 
 export interface PortfolioHistoryPoint {

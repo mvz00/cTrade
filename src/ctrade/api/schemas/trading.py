@@ -132,3 +132,17 @@ class QuickBuyResponse(BaseModel):
     take_profit: float | None = None
     status: str
     error: str | None = None
+
+
+class CandlePoint(BaseModel):
+    """Single candle close-price data point for charting."""
+
+    time: str
+    close: float
+
+
+class SymbolCandleSeries(BaseModel):
+    """Candle series for one symbol (used by batch candles endpoint)."""
+
+    symbol: str
+    candles: list[CandlePoint]

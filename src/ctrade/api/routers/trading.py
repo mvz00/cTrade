@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -13,6 +15,7 @@ from ctrade.api.schemas.trading import (
     ActivityEntry,
     AddPairRequest,
     AddPairsBatchRequest,
+    CandlePoint,
     EngineStartRequest,
     EngineStatusResponse,
     OrderResponse,
@@ -22,6 +25,7 @@ from ctrade.api.schemas.trading import (
     PositionResponse,
     QuickBuyRequest,
     QuickBuyResponse,
+    SymbolCandleSeries,
     TickerResponse,
 )
 from ctrade.exchange.engine_resolver import get_engine
@@ -362,6 +366,44 @@ async def get_ticker(symbol: str) -> TickerResponse:
         volume_24h=float(ticker.volume_24h),
         change_pct_24h=ticker.change_pct_24h,
     )
+
+
+logger = logging.getLogger(__name__)
+
+
+# ---- Candles (batch) ----
+
+@router.get("/candles", response_model=list[SymbolCandleSeries])
+async def get_candles_batch(
+    symbols: str = Query(..., description="Comma-separated symbols, e.g. BTC/AUD,ETH/AUD"),
+    timeframe: str = Query("1h", description="Candle timeframe: 1m, 5m, 15m, 1h"),
+    limit: int = Query(100, ge=1, le=500, description="Number of candles per symbol"),
+) -> list[SymbolCandleSeries]:
+    """Fetch OHLCV candle close prices for multiple symbols concurrently."""
+    symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    if not symbol_list:
+        return []
+    if len(symbol_list) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 symbols per request")
+
+    market = MarketDataProvider.get_instance()
+
+    async def _fetch(sym: str) -> SymbolCandleSeries | None:
+        try:
+            candles = await market.get_candles(sym, timeframe, limit)
+            return SymbolCandleSeries(
+                symbol=sym,
+                candles=[
+                    CandlePoint(time=c.time.isoformat(), close=float(c.close))
+                    for c in candles
+                ],
+            )
+        except Exception:
+            logger.warning("Failed to fetch candles for %s", sym, exc_info=True)
+            return None
+
+    results = await asyncio.gather(*[_fetch(sym) for sym in symbol_list])
+    return [r for r in results if r is not None]
 
 
 # ---- Activity Log ----

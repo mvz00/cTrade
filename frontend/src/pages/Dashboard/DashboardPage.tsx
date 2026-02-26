@@ -6,13 +6,15 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Spinner } from '@/components/ui/Spinner';
 import { EquityCurveChart } from '@/components/charts/EquityCurveChart';
+import { PositionPriceChart } from '@/components/charts/PositionPriceChart';
 import { PortfolioDonut } from '@/components/charts/PortfolioDonut';
 import { formatUSD, formatRelative } from '@/lib/formatters';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
 import { useWebSocket } from '@/api/hooks/useWebSocket';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { usePositionCandles } from '@/api/hooks/useTrading';
 import {
   DollarSign, TrendingUp, BarChart3, Radio, Layers, Activity,
 } from 'lucide-react';
@@ -31,9 +33,21 @@ const DASHBOARD_WS_EVENTS = [
 const HISTORY_RANGES = ['24h', '7d', '30d', '90d', 'all'] as const;
 type HistoryRange = (typeof HISTORY_RANGES)[number];
 
+const PRICE_RANGES = ['1h', '12h', '24h', '7d'] as const;
+type PriceRange = (typeof PRICE_RANGES)[number];
+
+/** Map UI range labels to API (timeframe, limit) parameters */
+const PRICE_RANGE_PARAMS: Record<PriceRange, { timeframe: string; limit: number }> = {
+  '1h':  { timeframe: '1m',  limit: 60 },
+  '12h': { timeframe: '5m',  limit: 144 },
+  '24h': { timeframe: '15m', limit: 96 },
+  '7d':  { timeframe: '1h',  limit: 168 },
+};
+
 export function DashboardPage() {
   const queryClient = useQueryClient();
   const [historyRange, setHistoryRange] = useState<HistoryRange>('7d');
+  const [priceRange, setPriceRange] = useState<PriceRange>('24h');
 
   // WebSocket: invalidate React Query cache on relevant events
   const handleWsMessage = useCallback(
@@ -65,6 +79,18 @@ export function DashboardPage() {
   const { data: positions } = useQuery({ queryKey: ['trading', 'positions', 'open'], queryFn: () => api.listPositions('open'), refetchInterval: REFETCH_INTERVALS.DASHBOARD });
   const { data: signals } = useQuery({ queryKey: ['signals', { limit: 10 }], queryFn: () => api.listSignals({ limit: 10 }), refetchInterval: REFETCH_INTERVALS.SIGNALS });
   const { data: recentTrades } = useQuery({ queryKey: ['dashboard', 'recent-trades'], queryFn: api.recentTrades, refetchInterval: REFETCH_INTERVALS.DASHBOARD });
+
+  // Open position symbols for price chart
+  const openSymbols = useMemo(
+    () => [...new Set((positions || []).map((p) => p.pair_symbol))],
+    [positions],
+  );
+  const priceParams = PRICE_RANGE_PARAMS[priceRange];
+  const { data: positionCandles } = usePositionCandles(
+    openSymbols,
+    priceParams.timeframe,
+    priceParams.limit,
+  );
 
   if (isLoading) return <Spinner />;
 
@@ -100,6 +126,31 @@ export function DashboardPage() {
           <CardValue><Badge variant={summary?.trading_mode === 'live' ? 'danger' : 'warning'}>{summary?.trading_mode === 'live' ? 'Live' : 'Paper'}</Badge></CardValue>
         </Card>
       </div>
+
+      {/* Open Positions Price Chart — only shown when positions exist */}
+      {openSymbols.length > 0 && (
+        <Card className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium text-ct-text-muted uppercase tracking-wider">Position Prices</h3>
+            <div className="flex gap-1">
+              {PRICE_RANGES.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setPriceRange(r)}
+                  className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                    priceRange === r
+                      ? 'bg-ct-accent text-white'
+                      : 'bg-ct-bg-hover text-ct-text-muted hover:text-ct-text'
+                  }`}
+                >
+                  {r.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          <PositionPriceChart series={positionCandles ?? []} />
+        </Card>
+      )}
 
       {/* Portfolio History Chart + Portfolio Donut */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
