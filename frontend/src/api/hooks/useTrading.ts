@@ -8,7 +8,7 @@ export function usePairs() {
 }
 
 export function useAvailablePairs() {
-  return useQuery({ queryKey: ['trading', 'available-pairs'], queryFn: api.availablePairs });
+  return useQuery({ queryKey: ['trading', 'available-pairs'], queryFn: api.availablePairs, refetchInterval: REFETCH_INTERVALS.CONFIG });
 }
 
 export function useAddPair() {
