@@ -93,9 +93,15 @@ class LiveEngine:
         try:
             from ctrade.notifications.channels.router import NotificationRouter
             router = NotificationRouter.get_instance()
+
+            # Self-heal: auto-register email channel from config if it's
+            # enabled but wasn't registered at startup (common when the
+            # config store isn't hydrated yet during app boot).
+            router.ensure_email_channel()
+
             channels = router.list_channels()
             if not channels:
-                logger.debug("No notification channels registered — skipping order-fill notification")
+                logger.info("No notification channels registered — skipping order-fill notification")
                 return
             side = order.side.value if hasattr(order.side, "value") else str(order.side)
             qty = float(order.filled_quantity) if order.filled_quantity else 0
