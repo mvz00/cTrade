@@ -113,6 +113,8 @@ class RuntimeConfigStore:
             "api_key_encrypted": "",  # base64-encoded encrypted MailerSend API key
             "from_address": "",
             "to_address": "",
+            "notify_on_buy": True,
+            "notify_on_sell": True,
         }
         self._data_lock = threading.Lock()
         self._hydrated: bool = False

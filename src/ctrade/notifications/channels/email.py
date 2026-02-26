@@ -35,12 +35,16 @@ class EmailChannel:
         from_address: str,
         to_address: str,
         from_name: str = "cTrade",
+        notify_on_buy: bool = True,
+        notify_on_sell: bool = True,
     ) -> None:
         self.name = "email"
         self._api_key = api_key
         self._from_address = from_address
         self._to_address = to_address
         self._from_name = from_name
+        self._notify_on_buy = notify_on_buy
+        self._notify_on_sell = notify_on_sell
 
     async def send(
         self,
@@ -51,6 +55,16 @@ class EmailChannel:
         """Send an email notification via MailerSend API."""
         try:
             meta = metadata or {}
+
+            # Filter order-fill notifications by side preference
+            side = str(meta.get("side", "")).upper()
+            if side == "BUY" and not self._notify_on_buy:
+                logger.debug("Skipping BUY email notification (disabled)")
+                return True
+            if side == "SELL" and not self._notify_on_sell:
+                logger.debug("Skipping SELL email notification (disabled)")
+                return True
+
             subject = self._build_subject(message, severity, meta)
             html_body = self._build_html(message, severity, meta)
 
