@@ -843,6 +843,10 @@ class TradingOrchestrator:
         # Both budget and price are in the quote currency (AUD, USDT, etc.)
         # so quantity is correctly in base units.
         quantity = position_budget / price
+        logger.info(
+            "Position sizing %s: max_order_usdt=%.2f, budget=%.2f, price=%.4f, qty=%.6f",
+            pair, max_order_usdt, position_budget, price, quantity,
+        )
 
         # Compute absolute SL/TP price levels
         if side == "buy":

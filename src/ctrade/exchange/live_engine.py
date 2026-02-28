@@ -249,10 +249,14 @@ class LiveEngine:
 
             market = MarketDataProvider.get_instance()
             # Use real exchange ticker for live mode price validation
-            ticker = await market._try_ccxt_ticker(symbol)
-            if ticker is None:
-                # Try /USD pair (common on Kraken)
-                ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
+            if symbol.endswith("/AUD"):
+                ticker = await MarketDataProvider._fetch_coinspot_price_native(symbol)
+                if ticker is None:
+                    ticker = await market._try_ccxt_ticker(symbol)
+            else:
+                ticker = await market._try_ccxt_ticker(symbol)
+                if ticker is None:
+                    ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
             current_price = float(ticker.last_price) if ticker else 0.0
 
             if current_price > 0:
@@ -325,7 +329,11 @@ class LiveEngine:
                         slippage = 1.005 if side == "buy" else 0.995
                         effective_price = round(base_price * slippage, 8)
                     else:
-                        _fb_ticker = await market._try_ccxt_ticker(symbol)
+                        # ccxt ticker failed — try CoinSpot native API for AUD pairs
+                        if symbol.endswith("/AUD"):
+                            _fb_ticker = await MarketDataProvider._fetch_coinspot_price_native(symbol)
+                        else:
+                            _fb_ticker = await market._try_ccxt_ticker(symbol)
                         if _fb_ticker:
                             if side == "sell" and float(_fb_ticker.bid) > 0:
                                 _cp = float(_fb_ticker.bid)
