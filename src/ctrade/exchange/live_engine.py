@@ -718,9 +718,16 @@ class LiveEngine:
 
         for symbol in symbols:
             try:
-                ticker = await market._try_ccxt_ticker(symbol)
-                if ticker is None:
-                    ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
+                # For AUD pairs, prefer CoinSpot public API (returns live
+                # market prices; ccxt may return stale data for CoinSpot).
+                if symbol.endswith("/AUD"):
+                    ticker = await MarketDataProvider._fetch_coinspot_price_native(symbol)
+                    if ticker is None:
+                        ticker = await market._try_ccxt_ticker(symbol)
+                else:
+                    ticker = await market._try_ccxt_ticker(symbol)
+                    if ticker is None:
+                        ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
                 if ticker:
                     self._live_prices[symbol] = float(ticker.last_price)
             except Exception:
@@ -761,13 +768,16 @@ class LiveEngine:
             for p in reversed(positions):
                 d = self._position_to_dict(p)
                 if p.status == PositionStatus.OPEN:
-                    # Use cached real price for live positions (updated by _refresh_live_prices)
-                    current = self._live_prices.get(p.pair_symbol)
-                    if current is None:
-                        # Fallback: use entry price (PnL = 0) rather than fake simulated price
-                        current = p.entry_price
+                    # Use cached real price for live positions (updated by refresh_live_prices)
+                    cached = self._live_prices.get(p.pair_symbol)
+                    if cached is not None:
+                        current = Decimal(str(cached))
                     else:
-                        current = Decimal(str(current))
+                        # Cache miss — fetch directly from MarketDataProvider
+                        from ctrade.exchange.market_data import MarketDataProvider
+                        market = MarketDataProvider.get_instance()
+                        live = market.get_current_price(p.pair_symbol)
+                        current = Decimal(str(live)) if live else p.entry_price
                     if p.side == PositionSide.LONG:
                         unrealized = (current - p.entry_price) * p.quantity
                     else:

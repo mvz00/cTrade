@@ -820,16 +820,28 @@ class TradingOrchestrator:
             except RuntimeError:
                 pass
 
-        position_budget = min(max_order_usdt, total_value * max_position_pct)
+        # total_value is in USD but max_order_usdt and price are in the
+        # pair's quote currency (e.g. AUD for BTC/AUD).  Convert portfolio
+        # value to quote currency so both sides of the min() are comparable.
+        quote = pair.split("/")[-1] if "/" in pair else "USDT"
+        if quote not in ("USD", "USDT"):
+            from ctrade.exchange.market_data import _FIAT_TO_USD
+            usd_rate = _FIAT_TO_USD.get(quote, 1.0)
+            if usd_rate > 0:
+                total_value = total_value / usd_rate  # USD → quote currency
+
+        # max_order_usdt is the user's explicit per-trade budget (e.g. $10).
+        # Honour it directly — it already acts as the hard cap.
+        # Only fall back to the portfolio-% limit when no explicit amount is set
+        # (i.e. when using the large default of 100).
+        position_budget = max_order_usdt
         ticker = await market.get_ticker(pair)
         price = float(ticker.last_price)
         if price <= 0:
             return
         # Position sizing: quantity = budget / price.
-        # For AUD pairs (e.g. BTC/AUD): budget is in AUD, price is in AUD,
-        # so quantity is correctly in base units despite the config field
-        # being named "max_order_usdt".  The naming reflects the original
-        # USDT-only design but the math is currency-agnostic.
+        # Both budget and price are in the quote currency (AUD, USDT, etc.)
+        # so quantity is correctly in base units.
         quantity = position_budget / price
 
         # Compute absolute SL/TP price levels
