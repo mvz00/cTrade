@@ -828,16 +828,28 @@ class LiveEngine:
             live_portfolio["total_orders"] = len(self._orders)
             return live_portfolio
 
-        # Fallback: build from in-memory state
+        # Fallback: build from in-memory state (exchange API unavailable)
+        with self._data_lock:
+            open_count = sum(
+                1 for p in self._positions if p.status == PositionStatus.OPEN
+            )
+            closed_count = sum(
+                1 for p in self._positions if p.status == PositionStatus.CLOSED
+            )
+            total_realized = sum(
+                float(p.realized_pnl or 0)
+                for p in self._positions
+                if p.status == PositionStatus.CLOSED
+            )
         return {
             "cash_balance": {},
             "total_value_usd": 0.0,
             "positions_value": 0.0,
             "unrealized_pnl": 0.0,
-            "realized_pnl": 0.0,
+            "realized_pnl": round(total_realized, 2),
             "daily_pnl": 0.0,
-            "open_positions": 0,
-            "closed_positions": 0,
+            "open_positions": open_count,
+            "closed_positions": closed_count,
             "total_orders": len(self._orders),
         }
 
