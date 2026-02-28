@@ -764,9 +764,11 @@ class TradingOrchestrator:
             )
             return
 
-        # Risk checks
+        # Risk checks — count open positions directly from engine state,
+        # not from get_portfolio() which depends on an exchange API call
+        # that can fail and return 0.
+        open_positions = len(engine.get_positions(status="open"))
         portfolio = await engine.get_portfolio()
-        open_positions = portfolio["open_positions"]
 
         # ---- Execute based on strategy mode ----
         if strategy_mode == "long_only":
