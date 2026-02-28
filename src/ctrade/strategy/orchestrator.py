@@ -838,17 +838,24 @@ class TradingOrchestrator:
         # Only fall back to the portfolio-% limit when no explicit amount is set
         # (i.e. when using the large default of 100).
         position_budget = max_order_usdt
-        ticker = await market.get_ticker(pair)
+
+        # Get REAL exchange price — not simulated.
+        # get_ticker() falls back to fake simulated prices when ccxt fails
+        # (which it always does for CoinSpot AUD pairs), so we must use
+        # the CoinSpot native API directly for AUD pairs.
+        ticker = None
+        if pair.endswith("/AUD"):
+            ticker = await MarketDataProvider._fetch_coinspot_price_native(pair)
+        if ticker is None:
+            ticker = await market.get_ticker(pair)
         price = float(ticker.last_price)
         if price <= 0:
             return
-        # Position sizing: quantity = budget / price.
-        # Both budget and price are in the quote currency (AUD, USDT, etc.)
-        # so quantity is correctly in base units.
+
         quantity = position_budget / price
         logger.info(
-            "Position sizing %s: max_order_usdt=%.2f, budget=%.2f, price=%.4f, qty=%.6f",
-            pair, max_order_usdt, position_budget, price, quantity,
+            "Position sizing %s: budget=%.2f, price=%.4f, qty=%.6f (investment=%.2f)",
+            pair, position_budget, price, quantity, quantity * price,
         )
 
         # Compute absolute SL/TP price levels

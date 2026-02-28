@@ -287,7 +287,12 @@ class MarketDataProvider:
 
     async def get_ticker(self, symbol: str) -> Ticker:
         """Get current ticker for a symbol."""
-        # Try ccxt first
+        # For AUD pairs, prefer CoinSpot native API (ccxt always fails for CoinSpot)
+        if symbol.endswith("/AUD"):
+            ticker = await MarketDataProvider._fetch_coinspot_price_native(symbol)
+            if ticker:
+                return ticker
+        # Try ccxt
         ticker = await self._try_ccxt_ticker(symbol)
         if ticker:
             return ticker
