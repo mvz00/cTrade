@@ -381,6 +381,9 @@ class TradingOrchestrator:
         max_open = trading.get("max_open_positions", 5)
         max_order_usdt = trading.get("max_order_usdt", 100.0)
 
+        # Diagnostic: log effective config so we can verify in the UI
+        logger.info("Trading tick config: max_order_usdt=%.2f, max_open=%d", max_order_usdt, max_open)
+
         # ---- Rank pairs by volatility (biggest movers first) ----
         ranked_pairs = self._rank_pairs_by_momentum(pairs)
 
@@ -919,7 +922,7 @@ class TradingOrchestrator:
             else:
                 self._log_activity(
                     log_type, pair,
-                    f"AUTO {side_label} {pair} {quantity:.6f} @ ${price:,.2f}{momentum_tag} → {order_status}",
+                    f"AUTO {side_label} {pair} {quantity:.6f} @ ${price:,.2f} (budget=${position_budget:.2f}){momentum_tag} → {order_status}",
                     {
                         "quantity": quantity, "price": price,
                         "budget": position_budget, "confidence": signal.confidence,
