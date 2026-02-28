@@ -148,6 +148,7 @@ class TradingOrchestrator:
         self._ta_engine = TechnicalAnalysisEngine()
         self._activity_log: list[dict[str, Any]] = []
         self._sl_history: dict[str, datetime] = {}  # pair → last SL timestamp
+        self._buy_attempts_this_tick = 0
 
     @classmethod
     def get_instance(cls) -> TradingOrchestrator:
@@ -393,6 +394,7 @@ class TradingOrchestrator:
 
         processed = 0
         errors = 0
+        self._buy_attempts_this_tick = 0
         for pair in ranked_pairs:
             # Route pair to its exchange based on quote currency
             pair_ex = store.find_exchange_for_pair(pair) if store else None
@@ -893,6 +895,7 @@ class TradingOrchestrator:
                 pair=pair, side=side_label, signal=signal,
                 composite=composite, agreement=agreement,
             )
+            self._buy_attempts_this_tick += 1
             order = await engine.place_order(
                 symbol=pair,
                 side=side,
@@ -1031,7 +1034,7 @@ class TradingOrchestrator:
         cmc_info = CoinMarketCapFeed.get_instance().get_volatility_info(pair)
 
         if signal.action == SignalAction.BUY:
-            if open_positions >= max_open:
+            if open_positions + self._buy_attempts_this_tick >= max_open:
                 return
             existing = engine.get_positions(status="open")
             if any(p["pair_symbol"] == pair and p["side"] == "long" for p in existing):
@@ -1097,7 +1100,7 @@ class TradingOrchestrator:
                 )
                 return
 
-            if open_positions >= max_open:
+            if open_positions + self._buy_attempts_this_tick >= max_open:
                 return
             existing = engine.get_positions(status="open")
             if any(p["pair_symbol"] == pair and p["side"] == "long" for p in existing):
