@@ -248,6 +248,15 @@ async def list_positions(
 ) -> list[PositionResponse]:
     """List positions."""
     engine = get_engine()
+
+    # Refresh live prices before returning positions so P&L is up-to-date
+    from ctrade.exchange.live_engine import LiveEngine
+    if isinstance(engine, LiveEngine):
+        try:
+            await engine.refresh_live_prices()
+        except Exception:
+            pass
+
     positions = engine.get_positions(status=status)
     return [PositionResponse(**p) for p in positions]
 

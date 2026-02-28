@@ -768,16 +768,17 @@ class LiveEngine:
             for p in reversed(positions):
                 d = self._position_to_dict(p)
                 if p.status == PositionStatus.OPEN:
-                    # Use cached real price for live positions (updated by refresh_live_prices)
+                    # Use cached real price for live positions.
+                    # Cache is populated by refresh_live_prices() which is
+                    # called every orchestrator tick AND by the positions API
+                    # endpoint before this method.
                     cached = self._live_prices.get(p.pair_symbol)
                     if cached is not None:
                         current = Decimal(str(cached))
                     else:
-                        # Cache miss — fetch directly from MarketDataProvider
-                        from ctrade.exchange.market_data import MarketDataProvider
-                        market = MarketDataProvider.get_instance()
-                        live = market.get_current_price(p.pair_symbol)
-                        current = Decimal(str(live)) if live else p.entry_price
+                        # Cache not yet populated — use entry price (P&L = 0)
+                        # until the next refresh cycle fills it.
+                        current = p.entry_price
                     if p.side == PositionSide.LONG:
                         unrealized = (current - p.entry_price) * p.quantity
                     else:
