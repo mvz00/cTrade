@@ -262,7 +262,7 @@ class LiveEngine:
             if current_price > 0:
                 order_value_usdt = float(quantity) * current_price
 
-                if order_value_usdt > max_order_usdt * 1.1:  # 10% tolerance for price movement
+                if order_value_usdt > max_order_usdt * 1.5:  # 50% tolerance for AUD/spread variance
                     order.status = OrderStatus.REJECTED
                     order.error_message = (
                         f"Order value ${order_value_usdt:.2f} exceeds max "
