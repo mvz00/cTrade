@@ -490,6 +490,28 @@ export interface ConnectionCredentialsRequest {
   credentials: Record<string, string>;
 }
 
+// ---- Recommendations ----
+
+export interface RecommendedBuy {
+  rank: number;
+  symbol: string;
+  name: string;
+  pair: string;
+  score: number;
+  pct_change_1h: number;
+  pct_change_24h: number;
+  pct_change_7d: number;
+  volume_24h: number;
+  market_cap: number;
+  est_trade_time: string;
+}
+
+export interface RecommendationsResponse {
+  strategy_mode: string;
+  recommendations: RecommendedBuy[];
+  source: string;
+}
+
 // ---- Position Candles (price chart) ----
 
 export interface CandlePoint {

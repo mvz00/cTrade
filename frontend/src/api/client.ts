@@ -50,6 +50,7 @@ import type {
   ConnectionCredentialsRequest,
   PortfolioHistorySeries,
   SymbolCandleSeries,
+  RecommendationsResponse,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -111,6 +112,7 @@ export const api = {
   portfolioHistory: (range: string = '7d') =>
     apiFetch<PortfolioHistorySeries[]>(`/dashboard/portfolio-history?range=${range}`),
   recentTrades: () => apiFetch<Position[]>('/dashboard/recent-trades'),
+  recommendations: () => apiFetch<RecommendationsResponse>('/dashboard/recommendations'),
 
   tradingMode: () => apiFetch<TradingModeResponse>('/config/trading-mode'),
   strategyConfig: () => apiFetch<StrategyConfig>('/config/strategy'),
