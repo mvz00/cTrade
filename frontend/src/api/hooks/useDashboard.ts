@@ -9,3 +9,11 @@ export function useDashboardSummary() {
     refetchInterval: REFETCH_INTERVALS.DASHBOARD,
   });
 }
+
+export function useRecommendations() {
+  return useQuery({
+    queryKey: ['dashboard', 'recommendations'],
+    queryFn: api.recommendations,
+    refetchInterval: REFETCH_INTERVALS.DASHBOARD,
+  });
+}

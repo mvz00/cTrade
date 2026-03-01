@@ -7,7 +7,8 @@ import { Spinner } from '@/components/ui/Spinner';
 import { NumberInput } from '@/components/ui/NumberInput';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
-import { useTradingMode, useRiskConfig, useUpdateTradingMode, useUpdateRisk } from '@/api/hooks/useConfig';
+import { useTradingMode, useRiskConfig, useStrategyConfig, useUpdateTradingMode, useUpdateRisk } from '@/api/hooks/useConfig';
+import { estimateTradeTime } from '@/lib/estimateTradeTime';
 import {
   usePairs, useAvailablePairs, useAddPairsBatch, useRemovePair, useRemoveAllPairs,
   usePositions, useClosePosition, useCloseAllPositions,
@@ -117,6 +118,7 @@ export function TradingPage() {
   // --- Data hooks ---
   const { data: mode } = useTradingMode();
   const { data: riskCfg } = useRiskConfig();
+  const { data: strategyCfg } = useStrategyConfig();
   const { data: pairs } = usePairs();
   const { data: availPairs } = useAvailablePairs();
   const { data: positions } = usePositions('open');
@@ -423,6 +425,7 @@ export function TradingPage() {
                   <th className="pb-2">Entry</th>
                   <th className="pb-2">Investment</th>
                   <th className="pb-2">SL / TP</th>
+                  <th className="pb-2">Est. Time</th>
                   <th className="pb-2">P&L</th>
                   <th className="pb-2"></th>
                 </tr>
@@ -456,6 +459,13 @@ export function TradingPage() {
                         {' / '}
                         {p.take_profit ? formatUSD(p.take_profit) : '—'}
                       </td>
+                      <td className="text-xs text-ct-text-muted">
+                        {estimateTradeTime(
+                          p,
+                          strategyCfg?.strategy_mode ?? 'long_only',
+                          riskCfg?.default_take_profit_pct ?? 0.06,
+                        )}
+                      </td>
                       <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
                         {formatUSD(p.unrealized_pnl ?? 0)}
                         <span className="text-xs text-ct-text-dim ml-1">
@@ -476,7 +486,7 @@ export function TradingPage() {
                     </tr>
                     {p.justification && (
                       <tr>
-                        <td colSpan={9} className="pb-2 px-1">
+                        <td colSpan={10} className="pb-2 px-1">
                           <p className="text-xs text-ct-text-dim italic leading-relaxed">
                             {p.justification}
                           </p>

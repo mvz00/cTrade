@@ -1,4 +1,5 @@
 import { useDashboardSummary } from '@/api/hooks/useDashboard';
+import { RecommendationsPanel } from '@/components/panels/RecommendationsPanel';
 import { useHealth } from '@/api/hooks/useHealth';
 import { Card, CardTitle, CardValue } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -189,6 +190,11 @@ export function DashboardPage() {
             </div>
           )}
         </Card>
+      </div>
+
+      {/* Recommended Buys */}
+      <div className="mb-6">
+        <RecommendationsPanel />
       </div>
 
       {/* System Status + Positions + Signals */}
