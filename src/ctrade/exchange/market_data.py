@@ -921,18 +921,25 @@ class MarketDataProvider:
         base, quote = parts[0].upper(), parts[1].upper()
 
         if quote in ("AUD", "USDT"):
+            # Use explicit decimal formatting to avoid scientific notation
+            # (e.g. "7.69e-05") which CoinSpot may not parse correctly.
+            # CoinSpot allows max 8 decimal places for amount, 8 for rate.
+            amount_str = f"{quantity:.8f}"
+            rate_str = f"{price:.8f}"
+
             # Try standard market buy/sell endpoint first
             endpoint = f"/api/v2/my/{'buy' if side == 'buy' else 'sell'}"
             payload: dict[str, Any] = {
                 "cointype": base,
-                "amount": str(quantity),
-                "rate": str(price),
+                "amount": amount_str,
+                "rate": rate_str,
                 "markettype": quote.lower(),
             }
             logger.info(
-                "CoinSpot V2 %s: %s qty=%.6f rate=%.8f markettype=%s",
+                "CoinSpot V2 %s: %s qty=%s rate=%s markettype=%s (budget=%.2f %s)",
                 "buy" if side == "buy" else "sell",
-                base, quantity, price, quote.lower(),
+                base, amount_str, rate_str, quote.lower(),
+                quantity * price, quote,
             )
 
             try:
@@ -950,11 +957,27 @@ class MarketDataProvider:
                         base, side,
                     )
                     instant_endpoint = f"/api/v2/my/{'buy' if side == 'buy' else 'sell'}/now"
-                    instant_payload: dict[str, Any] = {
-                        "cointype": base,
-                        "amounttype": "coin",
-                        "amount": str(quantity),
-                    }
+                    # Use amounttype=aud for buys so CoinSpot spends exactly
+                    # the intended budget.  For sells, use coin quantity.
+                    budget_quote = round(quantity * price, 2)
+                    if side == "buy":
+                        instant_payload: dict[str, Any] = {
+                            "cointype": base,
+                            "amounttype": quote.lower(),
+                            "amount": f"{budget_quote:.2f}",
+                        }
+                    else:
+                        instant_payload = {
+                            "cointype": base,
+                            "amounttype": "coin",
+                            "amount": f"{quantity:.8f}",
+                        }
+                    logger.info(
+                        "CoinSpot instant %s %s: amounttype=%s amount=%s",
+                        side, base,
+                        instant_payload["amounttype"],
+                        instant_payload["amount"],
+                    )
                     data = await MarketDataProvider._coinspot_v2_request(
                         api_key, api_secret, instant_endpoint, instant_payload,
                     )
@@ -963,6 +986,9 @@ class MarketDataProvider:
                     fill_rate = float(data.get("rate", price))
                     if fill_rate > 0:
                         price = fill_rate
+                        # Recalculate actual coin quantity from budget / fill rate
+                        if side == "buy" and fill_rate > 0:
+                            quantity = budget_quote / fill_rate
                 else:
                     raise
 

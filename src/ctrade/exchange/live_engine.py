@@ -315,34 +315,37 @@ class LiveEngine:
                 # limit orders fill immediately.  CoinSpot's spread is
                 # typically >1%, so using last_price with small slippage
                 # often leaves sell orders unfilled above the bid.
-                effective_price = price
-                if effective_price is None:
-                    base_price = 0.0
-                    if side == "sell" and ticker and float(ticker.bid) > 0:
-                        base_price = float(ticker.bid)
-                    elif side == "buy" and ticker and float(ticker.ask) > 0:
-                        base_price = float(ticker.ask)
-                    elif current_price > 0:
-                        base_price = current_price
+                # Always prefer fresh bid/ask over the passed-in price
+                # (which may be stale or just last_price).
+                base_price = 0.0
+                if side == "sell" and ticker and float(ticker.bid) > 0:
+                    base_price = float(ticker.bid)
+                elif side == "buy" and ticker and float(ticker.ask) > 0:
+                    base_price = float(ticker.ask)
+                elif current_price > 0:
+                    base_price = current_price
+                elif price is not None:
+                    base_price = float(price)
 
-                    if base_price > 0:
-                        slippage = 1.005 if side == "buy" else 0.995
-                        effective_price = round(base_price * slippage, 8)
+                effective_price = None
+                if base_price > 0:
+                    slippage = 1.005 if side == "buy" else 0.995
+                    effective_price = round(base_price * slippage, 8)
+                else:
+                    # ccxt ticker failed — try CoinSpot native API for AUD pairs
+                    if symbol.endswith("/AUD"):
+                        _fb_ticker = await MarketDataProvider._fetch_coinspot_price_native(symbol)
                     else:
-                        # ccxt ticker failed — try CoinSpot native API for AUD pairs
-                        if symbol.endswith("/AUD"):
-                            _fb_ticker = await MarketDataProvider._fetch_coinspot_price_native(symbol)
+                        _fb_ticker = await market._try_ccxt_ticker(symbol)
+                    if _fb_ticker:
+                        if side == "sell" and float(_fb_ticker.bid) > 0:
+                            _cp = float(_fb_ticker.bid)
+                        elif side == "buy" and float(_fb_ticker.ask) > 0:
+                            _cp = float(_fb_ticker.ask)
                         else:
-                            _fb_ticker = await market._try_ccxt_ticker(symbol)
-                        if _fb_ticker:
-                            if side == "sell" and float(_fb_ticker.bid) > 0:
-                                _cp = float(_fb_ticker.bid)
-                            elif side == "buy" and float(_fb_ticker.ask) > 0:
-                                _cp = float(_fb_ticker.ask)
-                            else:
-                                _cp = float(_fb_ticker.last_price)
-                            slippage = 1.005 if side == "buy" else 0.995
-                            effective_price = round(_cp * slippage, 8)
+                            _cp = float(_fb_ticker.last_price)
+                        slippage = 1.005 if side == "buy" else 0.995
+                        effective_price = round(_cp * slippage, 8)
 
                 if effective_price is None:
                     order.status = OrderStatus.REJECTED
