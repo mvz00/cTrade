@@ -852,14 +852,23 @@ class TradingOrchestrator:
             ticker = await MarketDataProvider._fetch_coinspot_price_native(pair)
         if ticker is None:
             ticker = await market.get_ticker(pair)
-        price = float(ticker.last_price)
+
+        # Use ask price for buys, bid for sells so limit orders fill
+        # immediately.  Fall back to last_price when bid/ask unavailable.
+        if side == "buy":
+            price = float(ticker.ask) if float(ticker.ask) > 0 else float(ticker.last_price)
+        else:
+            price = float(ticker.bid) if float(ticker.bid) > 0 else float(ticker.last_price)
         if price <= 0:
             return
 
         quantity = position_budget / price
         logger.info(
-            "Position sizing %s: budget=%.2f, price=%.4f, qty=%.6f (investment=%.2f)",
-            pair, position_budget, price, quantity, quantity * price,
+            "Position sizing %s: budget=%.2f, price=%.4f (bid=%.4f/ask=%.4f), qty=%.6f (investment=%.2f)",
+            pair, position_budget, price,
+            float(ticker.bid) if ticker.bid else 0,
+            float(ticker.ask) if ticker.ask else 0,
+            quantity, quantity * price,
         )
 
         # Compute absolute SL/TP price levels

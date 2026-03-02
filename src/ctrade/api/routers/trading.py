@@ -190,9 +190,9 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
 
     amount_usdt = body.amount_usdt or max_order_usdt
 
-    # Get current price
+    # Get current price — use ask for buys so limit orders fill immediately
     ticker = await market.get_ticker(body.symbol)
-    price = float(ticker.last_price)
+    price = float(ticker.ask) if float(ticker.ask) > 0 else float(ticker.last_price)
     if price <= 0:
         raise HTTPException(status_code=422, detail=f"Invalid price for {body.symbol}")
 
