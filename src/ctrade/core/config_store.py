@@ -118,6 +118,7 @@ class RuntimeConfigStore:
         }
         self._logging: dict[str, Any] = {
             "log_rollover_days": 7,
+            "data_rollover_days": 30,
         }
         self._data_lock = threading.Lock()
         self._hydrated: bool = False

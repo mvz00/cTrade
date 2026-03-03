@@ -1,9 +1,15 @@
-"""Batched log entry persistence — subscribes to EventBus LOG_ENTRY events.
+"""Batched log entry persistence and data retention cleanup.
 
-Always keeps an in-memory ring buffer of recent entries so the Logging page
-can show history even when the database is unavailable.  When the DB *is*
+Always keeps an in-memory ring buffer of recent log entries so the Logging
+page can show history even when the database is unavailable.  When the DB *is*
 reachable, entries are also flushed there in batches for cross-restart
-persistence and longer retention.
+persistence.
+
+Also runs periodic retention cleanup for ALL accumulating tables:
+- **Log tables** (log_entries, audit_log) — governed by ``log_rollover_days``
+- **Data tables** (signals, orders, positions, candles, sentiment_data,
+  onchain_metrics, portfolio_snapshots, alert_history) — governed by
+  ``data_rollover_days``
 """
 
 from __future__ import annotations
@@ -22,7 +28,8 @@ logger = logging.getLogger(__name__)
 _FLUSH_INTERVAL_SECONDS = 2.0
 _FLUSH_BATCH_SIZE = 50
 _CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
-_DEFAULT_RETENTION_DAYS = 7
+_DEFAULT_LOG_RETENTION_DAYS = 7
+_DEFAULT_DATA_RETENTION_DAYS = 30
 _MEMORY_BUFFER_SIZE = 2000  # Max entries kept in memory
 
 
@@ -33,7 +40,7 @@ class LogPersister:
 
     - Always keeps the last *_MEMORY_BUFFER_SIZE* entries in a ring buffer.
     - When the DB is available, also batch-flushes to ``log_entries`` table.
-    - Runs retention cleanup hourly (deletes DB entries older than configured days).
+    - Runs retention cleanup hourly for ALL accumulating tables.
     - Gracefully degrades if DB is unavailable (in-memory only).
     """
 
@@ -59,7 +66,8 @@ class LogPersister:
         self._db_buffer_lock = threading.Lock()
 
         # Configurable retention (loaded from RuntimeConfigStore on start)
-        self.retention_days: int = _DEFAULT_RETENTION_DAYS
+        self.log_retention_days: int = _DEFAULT_LOG_RETENTION_DAYS
+        self.data_retention_days: int = _DEFAULT_DATA_RETENTION_DAYS
 
         self._running = False
         self._flush_task: asyncio.Task[None] | None = None
@@ -118,9 +126,12 @@ class LogPersister:
             self._db_buffer.clear()
         return count
 
-    def set_retention_days(self, days: int) -> None:
-        """Update the retention period (hot-reload from config)."""
-        self.retention_days = max(1, min(days, 365))
+    def set_retention_days(self, *, log_days: int | None = None, data_days: int | None = None) -> None:
+        """Update retention periods (hot-reload from config)."""
+        if log_days is not None:
+            self.log_retention_days = max(1, min(log_days, 365))
+        if data_days is not None:
+            self.data_retention_days = max(1, min(data_days, 365))
 
     # ---- Lifecycle ----
 
@@ -134,9 +145,10 @@ class LogPersister:
             from ctrade.core.config_store import RuntimeConfigStore
             if RuntimeConfigStore.is_initialized():
                 cfg = RuntimeConfigStore.get().get_logging_config()
-                self.retention_days = cfg.get("log_rollover_days", _DEFAULT_RETENTION_DAYS)
+                self.log_retention_days = cfg.get("log_rollover_days", _DEFAULT_LOG_RETENTION_DAYS)
+                self.data_retention_days = cfg.get("data_rollover_days", _DEFAULT_DATA_RETENTION_DAYS)
         except Exception:
-            pass  # Use default
+            pass  # Use defaults
 
         self._running = True
         self._flush_task = asyncio.create_task(self._flush_loop())
@@ -232,7 +244,7 @@ class LogPersister:
     # ---- Retention cleanup ----
 
     async def _cleanup_loop(self) -> None:
-        """Periodically delete log entries older than configured retention."""
+        """Periodically run retention cleanup for all accumulating tables."""
         while self._running:
             try:
                 await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
@@ -240,28 +252,104 @@ class LogPersister:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Error in log cleanup loop")
+                logger.exception("Error in retention cleanup loop")
 
     async def _run_cleanup(self) -> None:
-        """Delete log entries older than retention period."""
+        """Delete old entries from all accumulating tables."""
         if not is_db_ready():
             return
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
+        log_cutoff = datetime.now(timezone.utc) - timedelta(days=self.log_retention_days)
+        data_cutoff = datetime.now(timezone.utc) - timedelta(days=self.data_retention_days)
 
         async def _do(session: Any) -> None:
             from sqlalchemy import delete
 
-            from ctrade.db.models import LogEntryModel
-
-            result = await session.execute(
-                delete(LogEntryModel).where(LogEntryModel.created_at < cutoff)
+            from ctrade.db.models import (
+                AlertHistoryModel,
+                AuditLogModel,
+                CandleModel,
+                LogEntryModel,
+                OnChainMetricModel,
+                OrderModel,
+                PortfolioSnapshotModel,
+                PositionModel,
+                SentimentDataModel,
+                SignalModel,
             )
-            count = result.rowcount
-            if count and count > 0:
+
+            total = 0
+
+            # --- Log tables (log_rollover_days) ---
+            r = await session.execute(
+                delete(LogEntryModel).where(LogEntryModel.created_at < log_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(AuditLogModel).where(AuditLogModel.created_at < log_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            # --- Data tables (data_rollover_days) ---
+            r = await session.execute(
+                delete(SignalModel).where(SignalModel.created_at < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(OrderModel).where(OrderModel.created_at < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            # Only clean closed positions older than cutoff
+            r = await session.execute(
+                delete(PositionModel).where(
+                    PositionModel.opened_at < data_cutoff,
+                    PositionModel.status == "closed",
+                )
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(CandleModel).where(CandleModel.time < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(SentimentDataModel).where(SentimentDataModel.time < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(OnChainMetricModel).where(OnChainMetricModel.time < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(PortfolioSnapshotModel).where(PortfolioSnapshotModel.time < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            r = await session.execute(
+                delete(AlertHistoryModel).where(AlertHistoryModel.created_at < data_cutoff)
+            )
+            if r.rowcount:
+                total += r.rowcount
+
+            if total > 0:
                 logger.info(
-                    "Log retention cleanup: deleted %d entries older than %d days",
-                    count, self.retention_days,
+                    "Retention cleanup: deleted %d total rows (logs>%dd, data>%dd)",
+                    total, self.log_retention_days, self.data_retention_days,
                 )
 
-        await run_simple_db_operation(_do, description="log retention cleanup")
+        await run_simple_db_operation(_do, description="retention cleanup (all tables)")

@@ -54,7 +54,7 @@ import type {
   LogHistoryResponse,
   LoggingConfig,
   LoggingConfigUpdate,
-  PurgeLogsResponse,
+  PurgeResponse,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -260,6 +260,6 @@ export const api = {
   loggingConfig: () => apiFetch<LoggingConfig>('/logging/config'),
   updateLoggingConfig: (body: LoggingConfigUpdate) =>
     apiFetch<LoggingConfig>('/logging/config', { method: 'PUT', body: JSON.stringify(body) }),
-  purgeLogs: () =>
-    apiFetch<PurgeLogsResponse>('/logging/purge', { method: 'POST' }),
+  purgeAllData: () =>
+    apiFetch<PurgeResponse>('/logging/purge', { method: 'POST' }),
 };
