@@ -4,6 +4,7 @@ import { StrategyForm } from './StrategyForm';
 import { RiskForm } from './RiskForm';
 import { ExchangeSection } from './ExchangeSection';
 import { EmailNotificationCard } from './EmailNotificationCard';
+import { LogManagementCard } from './LogManagementCard';
 
 export function ConfigPage() {
   return (
@@ -16,6 +17,7 @@ export function ConfigPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TradingModeCard />
         <EmailNotificationCard />
+        <LogManagementCard />
         <StrategyForm />
         <RiskForm />
         <ExchangeSection />

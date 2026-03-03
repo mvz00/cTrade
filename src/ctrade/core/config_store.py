@@ -116,6 +116,9 @@ class RuntimeConfigStore:
             "notify_on_buy": True,
             "notify_on_sell": True,
         }
+        self._logging: dict[str, Any] = {
+            "log_rollover_days": 7,
+        }
         self._data_lock = threading.Lock()
         self._hydrated: bool = False
 
@@ -204,6 +207,7 @@ class RuntimeConfigStore:
                 "exchanges": exchanges_data,
                 "feed_credentials": feed_creds_data,
                 "email": dict(self._email),
+                "logging": dict(self._logging),
             }
 
             async def _do_save() -> None:
@@ -268,6 +272,7 @@ class RuntimeConfigStore:
                 "exchanges": exchanges_data,
                 "feed_credentials": feed_creds_data,
                 "email": dict(self._email),
+                "logging": dict(self._logging),
             }
 
             # Ensure config directory exists
@@ -425,6 +430,10 @@ class RuntimeConfigStore:
             if "email" in state and isinstance(state["email"], dict):
                 self._email.update(state["email"])
 
+            # Restore logging settings
+            if "logging" in state and isinstance(state["logging"], dict):
+                self._logging.update(state["logging"])
+
             logger.info(
                 "Restored config state from disk (%d exchanges, %d feed credentials)",
                 len(self._exchanges),
@@ -525,6 +534,9 @@ class RuntimeConfigStore:
 
             if "email" in loaded and isinstance(loaded["email"], dict):
                 self._email.update(loaded["email"])
+
+            if "logging" in loaded and isinstance(loaded["logging"], dict):
+                self._logging.update(loaded["logging"])
 
         logger.info(
             "Restored config from DB (%d exchanges, %d feed credentials)",
@@ -710,6 +722,20 @@ class RuntimeConfigStore:
         except Exception:
             logger.warning("Failed to decrypt MailerSend API key", exc_info=True)
             return ""
+
+    # ---- Logging config ----
+
+    def get_logging_config(self) -> dict[str, Any]:
+        with self._data_lock:
+            return dict(self._logging)
+
+    def update_logging_config(self, updates: dict[str, Any]) -> dict[str, Any]:
+        with self._data_lock:
+            self._logging.update(updates)
+            result = dict(self._logging)
+        self._save_to_disk()
+        self._save_to_db()
+        return result
 
     def get_effective_risk(self, exchange_id: str | None = None) -> dict[str, Any]:
         """Return risk config with per-exchange overrides applied.
