@@ -126,17 +126,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"[cTrade] [4/6] WebSocket forwarder FAILED (non-fatal): {e}", flush=True)
 
-    # --- Step 4b: Log persistence ---
+    # --- Step 4b: Log persistence (always starts — in-memory buffer + optional DB) ---
     log_persister = None
     try:
-        if _event_bus and _db_available:
+        if _event_bus:
             from ctrade.core.events import EventTypes
             from ctrade.db.log_persister import LogPersister
 
             log_persister = LogPersister.get_instance()
             _event_bus.subscribe(EventTypes.LOG_ENTRY, log_persister.handle_log_event)
             await log_persister.start()
-            print("[cTrade]        Log persister started (batch writes to DB)", flush=True)
+            db_note = " + DB writes" if _db_available else " (in-memory only, DB unavailable)"
+            print(f"[cTrade]        Log persister started{db_note}", flush=True)
     except Exception as e:
         print(f"[cTrade]        Log persister FAILED (non-fatal): {e}", flush=True)
 

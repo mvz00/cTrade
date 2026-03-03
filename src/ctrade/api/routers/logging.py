@@ -1,4 +1,9 @@
-"""Log history and diagnostic endpoints."""
+"""Log history and diagnostic endpoints.
+
+Serves historical log entries from the database when available, falling back
+to the in-memory ring buffer in the ``LogPersister`` otherwise.  This means
+the Logging page always has *some* history, even when there is no DB.
+"""
 
 from __future__ import annotations
 
@@ -32,6 +37,47 @@ class LogHistoryResponse(BaseModel):
     has_more: bool
 
 
+# ---- Helpers ----
+
+def _serve_from_memory(
+    levels: list[str] | None,
+    search: str | None,
+    limit: int,
+    offset: int,
+) -> LogHistoryResponse:
+    """Serve log history from the in-memory ring buffer."""
+    from ctrade.db.log_persister import LogPersister
+
+    try:
+        persister = LogPersister.get_instance()
+    except Exception:
+        return LogHistoryResponse(entries=[], total=0, has_more=False)
+
+    page, total = persister.get_recent_entries(
+        levels=levels, search=search, limit=limit + 1, offset=offset,
+    )
+
+    has_more = len(page) > limit
+    if has_more:
+        page = page[:limit]
+
+    entries = [
+        LogEntryResponse(
+            id=item.get("_mem_id", 0),
+            timestamp=item.get("timestamp", ""),
+            level=item.get("level", "INFO"),
+            logger=item.get("logger", ""),
+            message=item.get("message", ""),
+            module=item.get("module", ""),
+            func=item.get("func", ""),
+            lineno=item.get("lineno", 0),
+        )
+        for item in page
+    ]
+
+    return LogHistoryResponse(entries=entries, total=total, has_more=has_more)
+
+
 # ---- Endpoints ----
 
 @router.get("/history", response_model=LogHistoryResponse)
@@ -43,19 +89,23 @@ async def log_history(
     limit: int = Query(200, ge=1, le=2000, description="Max entries to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ) -> LogHistoryResponse:
-    """Fetch historical log entries from the database.
+    """Fetch historical log entries.
 
+    Uses the database when available; falls back to the in-memory ring buffer.
     Returns entries ordered by timestamp descending (newest first).
     """
-    from ctrade.db.persistence import run_simple_db_operation
     from ctrade.main import is_db_available
-
-    if not is_db_available():
-        return LogHistoryResponse(entries=[], total=0, has_more=False)
 
     levels: list[str] | None = None
     if level:
         levels = [lv.strip().upper() for lv in level.split(",") if lv.strip()]
+
+    # --- Fallback: in-memory buffer ---
+    if not is_db_available():
+        return _serve_from_memory(levels, search, limit, offset)
+
+    # --- Primary: database query ---
+    from ctrade.db.persistence import run_simple_db_operation
 
     async def _query(session):  # type: ignore[no-untyped-def]
         from sqlalchemy import func, or_, select
@@ -112,7 +162,11 @@ async def log_history(
         return LogHistoryResponse(entries=entries, total=total, has_more=has_more)
 
     result = await run_simple_db_operation(_query, description="fetch log history")
-    return result or LogHistoryResponse(entries=[], total=0, has_more=False)
+    if result:
+        return result
+
+    # DB operation failed — fall back to memory
+    return _serve_from_memory(levels, search, limit, offset)
 
 
 @router.post("/test")

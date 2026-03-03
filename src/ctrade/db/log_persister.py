@@ -1,10 +1,17 @@
-"""Batched log entry persistence — subscribes to EventBus LOG_ENTRY events."""
+"""Batched log entry persistence — subscribes to EventBus LOG_ENTRY events.
+
+Always keeps an in-memory ring buffer of recent entries so the Logging page
+can show history even when the database is unavailable.  When the DB *is*
+reachable, entries are also flushed there in batches for cross-restart
+persistence and longer retention.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import threading
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar
 
@@ -16,18 +23,18 @@ _FLUSH_INTERVAL_SECONDS = 2.0
 _FLUSH_BATCH_SIZE = 50
 _CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
 _RETENTION_DAYS = 7
+_MEMORY_BUFFER_SIZE = 2000  # Max entries kept in memory
 
 
 class LogPersister:
-    """Buffers LOG_ENTRY events and flushes them to the database in batches.
+    """Buffers LOG_ENTRY events and optionally flushes them to the database.
 
     Singleton — use ``get_instance()`` to access.
 
-    - Subscribes to ``EventTypes.LOG_ENTRY`` on the EventBus.
-    - Buffers entries in memory.
-    - Flushes every 2 seconds OR when buffer hits 50 entries.
-    - Runs retention cleanup hourly (deletes entries older than 7 days).
-    - Gracefully degrades if DB is unavailable (drops entries silently).
+    - Always keeps the last *_MEMORY_BUFFER_SIZE* entries in a ring buffer.
+    - When the DB is available, also batch-flushes to ``log_entries`` table.
+    - Runs retention cleanup hourly (deletes DB entries older than 7 days).
+    - Gracefully degrades if DB is unavailable (in-memory only).
     """
 
     _instance: ClassVar[LogPersister | None] = None
@@ -42,11 +49,59 @@ class LogPersister:
         return cls._instance
 
     def __init__(self) -> None:
-        self._buffer: list[dict[str, Any]] = []
-        self._buffer_lock = threading.Lock()
+        # In-memory ring buffer — always active
+        self._ring: deque[dict[str, Any]] = deque(maxlen=_MEMORY_BUFFER_SIZE)
+        self._ring_lock = threading.Lock()
+        self._next_mem_id = 1  # Incrementing ID for in-memory entries
+
+        # DB flush buffer
+        self._db_buffer: list[dict[str, Any]] = []
+        self._db_buffer_lock = threading.Lock()
+
         self._running = False
         self._flush_task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
+
+    # ---- In-memory query ----
+
+    def get_recent_entries(
+        self,
+        *,
+        levels: list[str] | None = None,
+        search: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return entries from the in-memory ring buffer.
+
+        Returns (entries_page, total_matching) with entries in newest-first order.
+        """
+        with self._ring_lock:
+            all_entries = list(self._ring)
+
+        # Filter
+        if levels:
+            upper_levels = {lv.upper() for lv in levels}
+            all_entries = [e for e in all_entries if e.get("level", "").upper() in upper_levels]
+        if search:
+            search_lower = search.lower()
+            all_entries = [
+                e for e in all_entries
+                if search_lower in e.get("message", "").lower()
+                or search_lower in e.get("logger", "").lower()
+                or search_lower in e.get("module", "").lower()
+            ]
+
+        total = len(all_entries)
+
+        # Newest first
+        all_entries.reverse()
+
+        # Paginate
+        page = all_entries[offset : offset + limit]
+        return page, total
+
+    # ---- Lifecycle ----
 
     async def start(self) -> None:
         """Start the background flush and cleanup loops."""
@@ -72,36 +127,50 @@ class LogPersister:
             except asyncio.CancelledError:
                 pass
         # Final flush
-        await self._flush_buffer()
+        await self._flush_db_buffer()
+
+    # ---- Event handling ----
 
     async def handle_log_event(self, event: Any) -> None:
         """EventBus handler — called for each LOG_ENTRY event."""
         data = event.data
-        with self._buffer_lock:
-            self._buffer.append(data)
-            buffer_len = len(self._buffer)
 
-        if buffer_len >= _FLUSH_BATCH_SIZE:
-            await self._flush_buffer()
+        # Always add to in-memory ring buffer
+        with self._ring_lock:
+            mem_id = self._next_mem_id
+            self._next_mem_id += 1
+            data_with_id = {**data, "_mem_id": mem_id}
+            self._ring.append(data_with_id)
+
+        # Also buffer for DB flush if DB is available
+        if is_db_ready():
+            with self._db_buffer_lock:
+                self._db_buffer.append(data)
+                buffer_len = len(self._db_buffer)
+
+            if buffer_len >= _FLUSH_BATCH_SIZE:
+                await self._flush_db_buffer()
+
+    # ---- DB flush ----
 
     async def _flush_loop(self) -> None:
         """Periodic flush every _FLUSH_INTERVAL_SECONDS."""
         while self._running:
             try:
                 await asyncio.sleep(_FLUSH_INTERVAL_SECONDS)
-                await self._flush_buffer()
+                await self._flush_db_buffer()
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("Error in log flush loop")
 
-    async def _flush_buffer(self) -> None:
+    async def _flush_db_buffer(self) -> None:
         """Flush buffered entries to the database."""
-        with self._buffer_lock:
-            if not self._buffer:
+        with self._db_buffer_lock:
+            if not self._db_buffer:
                 return
-            batch = self._buffer[:]
-            self._buffer.clear()
+            batch = self._db_buffer[:]
+            self._db_buffer.clear()
 
         if not is_db_ready():
             return
@@ -128,6 +197,8 @@ class LogPersister:
             session.add_all(objects)
 
         await run_simple_db_operation(_do, description=f"flush {len(batch)} log entries")
+
+    # ---- Retention cleanup ----
 
     async def _cleanup_loop(self) -> None:
         """Periodically delete log entries older than _RETENTION_DAYS."""
