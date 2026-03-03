@@ -92,6 +92,7 @@ async def update_trading_mode(body: TradingModeUpdate) -> TradingModeResponse:
             )
 
     updated = (await _store()).update_trading(updates)
+    logger.info("Trading mode changed to %s", updated.get("mode", "unknown"))
     return TradingModeResponse(**updated)
 
 
@@ -110,6 +111,7 @@ async def update_strategy_config(body: StrategyConfigUpdate) -> StrategyConfigRe
         updated = (await _store()).update_strategy(body.model_dump(exclude_none=True))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+    logger.info("Strategy config updated")
     return StrategyConfigResponse(**updated)
 
 
@@ -125,6 +127,7 @@ async def get_risk_config() -> RiskConfigResponse:
 async def update_risk_config(body: RiskConfigUpdate) -> RiskConfigResponse:
     """Update risk management parameters."""
     updated = (await _store()).update_risk(body.model_dump(exclude_none=True))
+    logger.info("Risk config updated")
     return RiskConfigResponse(**updated)
 
 
@@ -154,6 +157,7 @@ async def update_email_config(body: EmailConfigUpdate) -> EmailConfigResponse:
     store = await _store()
     updates = body.model_dump(exclude_none=True)
     updated = store.update_email(updates)
+    logger.info("Email config updated")
 
     # Hot-reload: re-register (or unregister) the email channel so
     # config changes take effect without an app restart.
