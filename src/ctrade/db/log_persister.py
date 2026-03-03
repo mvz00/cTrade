@@ -104,12 +104,18 @@ class LogPersister:
         page = all_entries[offset : offset + limit]
         return page, total
 
-    def clear_ring_buffer(self) -> int:
-        """Clear the in-memory ring buffer. Returns number of entries cleared."""
+    def clear_all_buffers(self) -> int:
+        """Clear both the in-memory ring buffer and the pending DB flush buffer.
+
+        Returns the number of ring-buffer entries cleared.  Must be called
+        during purge so the next flush cycle doesn't re-populate the DB.
+        """
         with self._ring_lock:
             count = len(self._ring)
             self._ring.clear()
             self._next_mem_id = 1
+        with self._db_buffer_lock:
+            self._db_buffer.clear()
         return count
 
     def set_retention_days(self, days: int) -> None:

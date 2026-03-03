@@ -229,25 +229,25 @@ async def purge_logs() -> PurgeLogsResponse:
     """Purge all log entries from both database tables and the in-memory buffer.
 
     Deletes all rows from ``audit_log`` and ``log_entries`` tables.
+    Clears both the in-memory ring buffer AND the pending DB flush buffer
+    so the next flush cycle doesn't re-populate the tables.
     """
     from ctrade.db.log_persister import LogPersister
-    from ctrade.main import is_db_available
+    from ctrade.db.persistence import is_db_ready, run_simple_db_operation
 
     audit_deleted = 0
     entries_deleted = 0
     memory_cleared = 0
 
-    # Clear in-memory ring buffer
+    # Clear in-memory ring buffer AND the pending DB flush buffer
     try:
         persister = LogPersister.get_instance()
-        memory_cleared = persister.clear_ring_buffer()
+        memory_cleared = persister.clear_all_buffers()
     except Exception:
         pass
 
     # Clear DB tables
-    if is_db_available():
-        from ctrade.db.persistence import run_simple_db_operation
-
+    if is_db_ready():
         async def _purge(session):  # type: ignore[no-untyped-def]
             from sqlalchemy import delete
 
