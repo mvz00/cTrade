@@ -38,6 +38,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
 
+  // Stabilise subscriptions: use a serialised key for the dependency so that
+  // inline arrays like ['log.entry'] don't cause reconnection loops.
+  const subsRef = useRef(subscriptions);
+  subsRef.current = subscriptions;
+  const subsKey = subscriptions ? JSON.stringify(subscriptions) : '';
+
   const connect = useCallback(() => {
     if (!enabled) return;
 
@@ -52,8 +58,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     ws.onopen = () => {
       setConnected(true);
       // Send subscription filter
-      if (subscriptions && subscriptions.length > 0) {
-        ws.send(JSON.stringify({ subscribe: subscriptions }));
+      const subs = subsRef.current;
+      if (subs && subs.length > 0) {
+        ws.send(JSON.stringify({ subscribe: subs }));
       }
     };
 
@@ -79,7 +86,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     ws.onerror = () => {
       // onclose will fire after onerror — reconnect happens there
     };
-  }, [enabled, subscriptions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, subsKey]);
 
   useEffect(() => {
     connect();
