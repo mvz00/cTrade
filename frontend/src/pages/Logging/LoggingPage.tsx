@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
-  ScrollText, Trash2, Pause, Play, Search, ChevronDown,
+  ScrollText, Trash2, Pause, Play, Search, ChevronDown, Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -72,7 +72,7 @@ export function LoggingPage() {
     });
   }, []);
 
-  useWebSocket({
+  const { connected } = useWebSocket({
     subscriptions: ['log.entry'],
     onMessage,
   });
@@ -130,9 +130,14 @@ export function LoggingPage() {
         description="Live stream of backend log entries"
         actions={
           <div className="flex items-center gap-2">
-            <Badge variant={paused ? 'warning' : 'success'}>
-              {paused ? 'Paused' : 'Live'}
-            </Badge>
+            {!connected && (
+              <Badge variant="danger">Disconnected</Badge>
+            )}
+            {connected && (
+              <Badge variant={paused ? 'warning' : 'success'}>
+                {paused ? 'Paused' : 'Live'}
+              </Badge>
+            )}
             <span className="text-xs text-ct-text-dim">{entries.length} entries</span>
           </div>
         }
@@ -185,6 +190,20 @@ export function LoggingPage() {
           </button>
 
           <button
+            onClick={() => {
+              const token = localStorage.getItem('ctrade_token');
+              fetch('/api/v1/logging/test', {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              });
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-ct-blue/20 text-ct-blue hover:bg-ct-blue/30 transition-colors"
+          >
+            <Zap size={14} />
+            Test
+          </button>
+
+          <button
             onClick={() => { setEntries([]); nextId = 0; }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-ct-bg-hover text-ct-text-muted hover:text-ct-text transition-colors"
           >
@@ -204,9 +223,18 @@ export function LoggingPage() {
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-ct-text-dim py-12">
               <ScrollText size={40} className="mb-3" />
-              <p className="text-sm">{entries.length === 0 ? 'Waiting for log entries...' : 'No entries match your filters'}</p>
-              {entries.length === 0 && (
-                <p className="text-xs mt-1">Log entries will appear here as the backend processes requests</p>
+              {!connected ? (
+                <>
+                  <p className="text-sm text-ct-red">WebSocket not connected</p>
+                  <p className="text-xs mt-1">Check that the backend is running and refresh the page</p>
+                </>
+              ) : entries.length === 0 ? (
+                <>
+                  <p className="text-sm">Waiting for log entries...</p>
+                  <p className="text-xs mt-1">Log entries will appear here as the backend processes requests</p>
+                </>
+              ) : (
+                <p className="text-sm">No entries match your filters</p>
               )}
             </div>
           ) : (

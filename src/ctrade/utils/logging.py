@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import threading
@@ -17,11 +18,16 @@ class WebSocketLogHandler(logging.Handler):
     Records are forwarded as ``log.entry`` events and reach WebSocket
     clients via the existing EventBus → WebSocket pipeline.
 
+    Uses ``loop.call_soon_threadsafe`` so that log records emitted from
+    *any* thread (background workers, threadpool, etc.) are safely
+    enqueued on the asyncio event loop.
+
     A thread-local guard prevents infinite recursion when the EventBus
     or WebSocket code itself emits log messages.
     """
 
     _local = threading.local()
+    _loop: asyncio.AbstractEventLoop | None = None
 
     def emit(self, record: logging.LogRecord) -> None:
         # Guard against recursion
@@ -32,7 +38,7 @@ class WebSocketLogHandler(logging.Handler):
             from ctrade.core.events import Event, EventBus, EventTypes
 
             bus = EventBus._instance  # noqa: SLF001 — avoid get_instance() to skip init
-            if bus is None:
+            if bus is None or not bus._running:  # noqa: SLF001
                 return
 
             data: dict[str, Any] = {
@@ -45,7 +51,21 @@ class WebSocketLogHandler(logging.Handler):
                 "lineno": record.lineno,
             }
 
-            bus.publish_nowait(Event(event_type=EventTypes.LOG_ENTRY, data=data))
+            event = Event(event_type=EventTypes.LOG_ENTRY, data=data)
+
+            # Lazily capture the running event loop reference
+            if self._loop is None or self._loop.is_closed():
+                try:
+                    self._loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    pass
+
+            if self._loop is not None and self._loop.is_running():
+                # Thread-safe: works from event-loop thread AND worker threads
+                self._loop.call_soon_threadsafe(bus.publish_nowait, event)
+            else:
+                # Fallback for edge cases (e.g., during shutdown)
+                bus.publish_nowait(event)
         except Exception:
             pass  # Never let logging handler errors propagate
         finally:

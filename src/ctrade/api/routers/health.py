@@ -8,12 +8,15 @@ of pinging the database on every health-check request.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter
 
 router = APIRouter()
+
+_test_logger = logging.getLogger("ctrade.logging_test")
 
 
 @router.get("/health")
@@ -35,3 +38,11 @@ async def health_check() -> dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": "connected" if db_ok else "unavailable",
     }
+
+
+@router.post("/logging/test")
+async def logging_test() -> dict[str, str]:
+    """Emit a test log entry to verify the logging → WebSocket pipeline."""
+    _test_logger.info("Test log entry from /api/v1/logging/test")
+    _test_logger.warning("Test WARNING from /api/v1/logging/test")
+    return {"status": "ok", "message": "Test log entries emitted"}
