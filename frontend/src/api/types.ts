@@ -555,3 +555,19 @@ export interface LogHistoryResponse {
   total: number;
   has_more: boolean;
 }
+
+// ---- Logging Config ----
+
+export interface LoggingConfig {
+  log_rollover_days: number;
+}
+
+export interface LoggingConfigUpdate {
+  log_rollover_days?: number;
+}
+
+export interface PurgeLogsResponse {
+  audit_log_deleted: number;
+  log_entries_deleted: number;
+  memory_cleared: number;
+}

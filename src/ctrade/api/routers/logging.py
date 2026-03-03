@@ -1,4 +1,4 @@
-"""Log history and diagnostic endpoints.
+"""Log history, configuration, and diagnostic endpoints.
 
 Serves historical log entries from the database when available, falling back
 to the in-memory ring buffer in the ``LogPersister`` otherwise.  This means
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/logging", tags=["logging"])
 
 _test_logger = logging.getLogger("ctrade.logging_test")
+_logger = logging.getLogger(__name__)
 
 
 # ---- Schemas ----
@@ -35,6 +36,20 @@ class LogHistoryResponse(BaseModel):
     entries: list[LogEntryResponse]
     total: int
     has_more: bool
+
+
+class LoggingConfigResponse(BaseModel):
+    log_rollover_days: int
+
+
+class LoggingConfigUpdate(BaseModel):
+    log_rollover_days: int | None = None
+
+
+class PurgeLogsResponse(BaseModel):
+    audit_log_deleted: int
+    log_entries_deleted: int
+    memory_cleared: int
 
 
 # ---- Helpers ----
@@ -167,6 +182,95 @@ async def log_history(
 
     # DB operation failed — fall back to memory
     return _serve_from_memory(levels, search, limit, offset)
+
+
+@router.get("/config", response_model=LoggingConfigResponse)
+async def get_logging_config() -> LoggingConfigResponse:
+    """Get logging configuration (rollover days)."""
+    from ctrade.core.config_store import RuntimeConfigStore
+
+    try:
+        cfg = RuntimeConfigStore.get().get_logging_config()
+        return LoggingConfigResponse(log_rollover_days=cfg.get("log_rollover_days", 7))
+    except Exception:
+        return LoggingConfigResponse(log_rollover_days=7)
+
+
+@router.put("/config", response_model=LoggingConfigResponse)
+async def update_logging_config(body: LoggingConfigUpdate) -> LoggingConfigResponse:
+    """Update logging configuration (rollover days)."""
+    from ctrade.core.config_store import RuntimeConfigStore
+    from ctrade.db.log_persister import LogPersister
+
+    updates: dict = {}
+    if body.log_rollover_days is not None:
+        days = max(1, min(body.log_rollover_days, 365))
+        updates["log_rollover_days"] = days
+
+    if updates:
+        result = RuntimeConfigStore.get().update_logging_config(updates)
+
+        # Hot-reload retention in LogPersister
+        try:
+            persister = LogPersister.get_instance()
+            persister.set_retention_days(result.get("log_rollover_days", 7))
+        except Exception:
+            pass
+
+        _logger.info("Logging config updated: %s", updates)
+        return LoggingConfigResponse(log_rollover_days=result.get("log_rollover_days", 7))
+
+    cfg = RuntimeConfigStore.get().get_logging_config()
+    return LoggingConfigResponse(log_rollover_days=cfg.get("log_rollover_days", 7))
+
+
+@router.post("/purge", response_model=PurgeLogsResponse)
+async def purge_logs() -> PurgeLogsResponse:
+    """Purge all log entries from both database tables and the in-memory buffer.
+
+    Deletes all rows from ``audit_log`` and ``log_entries`` tables.
+    """
+    from ctrade.db.log_persister import LogPersister
+    from ctrade.main import is_db_available
+
+    audit_deleted = 0
+    entries_deleted = 0
+    memory_cleared = 0
+
+    # Clear in-memory ring buffer
+    try:
+        persister = LogPersister.get_instance()
+        memory_cleared = persister.clear_ring_buffer()
+    except Exception:
+        pass
+
+    # Clear DB tables
+    if is_db_available():
+        from ctrade.db.persistence import run_simple_db_operation
+
+        async def _purge(session):  # type: ignore[no-untyped-def]
+            from sqlalchemy import delete
+
+            from ctrade.db.models import AuditLogModel, LogEntryModel
+
+            r1 = await session.execute(delete(AuditLogModel))
+            r2 = await session.execute(delete(LogEntryModel))
+            return (r1.rowcount or 0, r2.rowcount or 0)
+
+        result = await run_simple_db_operation(_purge, description="purge all log tables")
+        if result:
+            audit_deleted, entries_deleted = result
+
+    _logger.info(
+        "Logs purged: audit_log=%d, log_entries=%d, memory=%d",
+        audit_deleted, entries_deleted, memory_cleared,
+    )
+
+    return PurgeLogsResponse(
+        audit_log_deleted=audit_deleted,
+        log_entries_deleted=entries_deleted,
+        memory_cleared=memory_cleared,
+    )
 
 
 @router.post("/test")

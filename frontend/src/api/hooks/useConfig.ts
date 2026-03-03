@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
-import type { TradingModeUpdate, StrategyConfigUpdate, RiskConfigUpdate, EmailConfigUpdate } from '../types';
+import type { TradingModeUpdate, StrategyConfigUpdate, RiskConfigUpdate, EmailConfigUpdate, LoggingConfigUpdate } from '../types';
 
 export function useTradingMode() {
   return useQuery({
@@ -82,5 +82,33 @@ export function useUpdateEmailConfig() {
 export function useTestEmail() {
   return useMutation({
     mutationFn: () => api.testEmail(),
+  });
+}
+
+export function useLoggingConfig() {
+  return useQuery({
+    queryKey: ['config', 'logging'],
+    queryFn: api.loggingConfig,
+    refetchInterval: REFETCH_INTERVALS.CONFIG,
+  });
+}
+
+export function useUpdateLoggingConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LoggingConfigUpdate) => api.updateLoggingConfig(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['config', 'logging'] });
+    },
+  });
+}
+
+export function usePurgeLogs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.purgeLogs(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['config', 'logging'] });
+    },
   });
 }

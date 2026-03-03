@@ -52,6 +52,9 @@ import type {
   SymbolCandleSeries,
   RecommendationsResponse,
   LogHistoryResponse,
+  LoggingConfig,
+  LoggingConfigUpdate,
+  PurgeLogsResponse,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -254,4 +257,9 @@ export const api = {
     const q = qs.toString();
     return apiFetch<LogHistoryResponse>(`/logging/history${q ? `?${q}` : ''}`);
   },
+  loggingConfig: () => apiFetch<LoggingConfig>('/logging/config'),
+  updateLoggingConfig: (body: LoggingConfigUpdate) =>
+    apiFetch<LoggingConfig>('/logging/config', { method: 'PUT', body: JSON.stringify(body) }),
+  purgeLogs: () =>
+    apiFetch<PurgeLogsResponse>('/logging/purge', { method: 'POST' }),
 };

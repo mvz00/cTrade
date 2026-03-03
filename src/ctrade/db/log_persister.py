@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _FLUSH_INTERVAL_SECONDS = 2.0
 _FLUSH_BATCH_SIZE = 50
 _CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
-_RETENTION_DAYS = 7
+_DEFAULT_RETENTION_DAYS = 7
 _MEMORY_BUFFER_SIZE = 2000  # Max entries kept in memory
 
 
@@ -33,7 +33,7 @@ class LogPersister:
 
     - Always keeps the last *_MEMORY_BUFFER_SIZE* entries in a ring buffer.
     - When the DB is available, also batch-flushes to ``log_entries`` table.
-    - Runs retention cleanup hourly (deletes DB entries older than 7 days).
+    - Runs retention cleanup hourly (deletes DB entries older than configured days).
     - Gracefully degrades if DB is unavailable (in-memory only).
     """
 
@@ -57,6 +57,9 @@ class LogPersister:
         # DB flush buffer
         self._db_buffer: list[dict[str, Any]] = []
         self._db_buffer_lock = threading.Lock()
+
+        # Configurable retention (loaded from RuntimeConfigStore on start)
+        self.retention_days: int = _DEFAULT_RETENTION_DAYS
 
         self._running = False
         self._flush_task: asyncio.Task[None] | None = None
@@ -101,12 +104,34 @@ class LogPersister:
         page = all_entries[offset : offset + limit]
         return page, total
 
+    def clear_ring_buffer(self) -> int:
+        """Clear the in-memory ring buffer. Returns number of entries cleared."""
+        with self._ring_lock:
+            count = len(self._ring)
+            self._ring.clear()
+            self._next_mem_id = 1
+        return count
+
+    def set_retention_days(self, days: int) -> None:
+        """Update the retention period (hot-reload from config)."""
+        self.retention_days = max(1, min(days, 365))
+
     # ---- Lifecycle ----
 
     async def start(self) -> None:
         """Start the background flush and cleanup loops."""
         if self._running:
             return
+
+        # Load retention days from config store if available
+        try:
+            from ctrade.core.config_store import RuntimeConfigStore
+            if RuntimeConfigStore.is_initialized():
+                cfg = RuntimeConfigStore.get().get_logging_config()
+                self.retention_days = cfg.get("log_rollover_days", _DEFAULT_RETENTION_DAYS)
+        except Exception:
+            pass  # Use default
+
         self._running = True
         self._flush_task = asyncio.create_task(self._flush_loop())
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
@@ -201,7 +226,7 @@ class LogPersister:
     # ---- Retention cleanup ----
 
     async def _cleanup_loop(self) -> None:
-        """Periodically delete log entries older than _RETENTION_DAYS."""
+        """Periodically delete log entries older than configured retention."""
         while self._running:
             try:
                 await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
@@ -216,7 +241,7 @@ class LogPersister:
         if not is_db_ready():
             return
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=_RETENTION_DAYS)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
 
         async def _do(session: Any) -> None:
             from sqlalchemy import delete
@@ -230,7 +255,7 @@ class LogPersister:
             if count and count > 0:
                 logger.info(
                     "Log retention cleanup: deleted %d entries older than %d days",
-                    count, _RETENTION_DAYS,
+                    count, self.retention_days,
                 )
 
         await run_simple_db_operation(_do, description="log retention cleanup")
