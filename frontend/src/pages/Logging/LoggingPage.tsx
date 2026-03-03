@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Spinner } from '@/components/ui/Spinner';
 import { useWebSocket } from '@/api/hooks/useWebSocket';
+import { api } from '@/api/client';
 import {
   ScrollText, Trash2, Pause, Play, Search, ChevronDown, Zap, Download,
 } from 'lucide-react';
@@ -19,7 +21,7 @@ interface LogEntry {
   lineno: number;
 }
 
-const MAX_ENTRIES = 500;
+const MAX_ENTRIES = 1000;
 
 const LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const;
 type Level = (typeof LEVELS)[number];
@@ -55,10 +57,12 @@ const EXPORT_RANGES = [
   { label: 'All entries', minutes: 0 },
 ] as const;
 
-let nextId = 0;
+// Live entries use IDs starting from a high offset to avoid collision with DB IDs
+let liveNextId = 1_000_000_000;
 
 export function LoggingPage() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [enabledLevels, setEnabledLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [searchText, setSearchText] = useState('');
   const [paused, setPaused] = useState(false);
@@ -67,7 +71,38 @@ export function LoggingPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
+  const historyLoadedRef = useRef(false);
   pausedRef.current = paused;
+
+  // Fetch history on mount
+  useEffect(() => {
+    if (historyLoadedRef.current) return;
+    historyLoadedRef.current = true;
+
+    api.logHistory({ limit: 500 })
+      .then(data => {
+        if (data?.entries?.length) {
+          // API returns newest-first, reverse for oldest-first display
+          const historyEntries: LogEntry[] = data.entries
+            .reverse()
+            .map(e => ({
+              id: e.id,
+              timestamp: e.timestamp,
+              level: e.level,
+              logger: e.logger,
+              message: e.message,
+              module: e.module,
+              func: e.func,
+              lineno: e.lineno,
+            }));
+          setEntries(historyEntries);
+        }
+      })
+      .catch(() => {
+        // History unavailable — live-only mode
+      })
+      .finally(() => setHistoryLoading(false));
+  }, []);
 
   const onMessage = useCallback((msg: { type: string; data: Record<string, unknown> }) => {
     if (msg.type !== 'log.entry') return;
@@ -84,7 +119,7 @@ export function LoggingPage() {
     };
 
     setEntries(prev => {
-      const next = [...prev, { ...d, id: nextId++ }];
+      const next = [...prev, { ...d, id: liveNextId++ }];
       return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next;
     });
   }, []);
@@ -126,7 +161,6 @@ export function LoggingPage() {
     setEnabledLevels(prev => {
       const next = new Set(prev);
       if (next.has(level)) {
-        // Don't allow disabling all levels
         if (next.size > 1) next.delete(level);
       } else {
         next.add(level);
@@ -135,7 +169,7 @@ export function LoggingPage() {
     });
   };
 
-  const filtered = entries.filter(e => {
+  const filtered = useMemo(() => entries.filter(e => {
     if (!enabledLevels.has(e.level as Level)) return false;
     if (searchText) {
       const lower = searchText.toLowerCase();
@@ -146,12 +180,12 @@ export function LoggingPage() {
       );
     }
     return true;
-  });
+  }), [entries, enabledLevels, searchText]);
 
-  const counts = entries.reduce<Record<string, number>>((acc, e) => {
+  const counts = useMemo(() => entries.reduce<Record<string, number>>((acc, e) => {
     acc[e.level] = (acc[e.level] || 0) + 1;
     return acc;
-  }, {});
+  }, {}), [entries]);
 
   function formatTime(iso: string) {
     try {
@@ -321,7 +355,7 @@ export function LoggingPage() {
           </div>
 
           <button
-            onClick={() => { setEntries([]); nextId = 0; }}
+            onClick={() => { setEntries([]); liveNextId = 1_000_000_000; }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-ct-bg-hover text-ct-text-muted hover:text-ct-text transition-colors"
           >
             <Trash2 size={14} />
@@ -337,7 +371,9 @@ export function LoggingPage() {
           onScroll={handleScroll}
           className="h-full overflow-y-auto overflow-x-auto font-mono text-xs"
         >
-          {filtered.length === 0 ? (
+          {historyLoading ? (
+            <Spinner className="h-full" />
+          ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-ct-text-dim py-12">
               <ScrollText size={40} className="mb-3" />
               {!connected ? (
