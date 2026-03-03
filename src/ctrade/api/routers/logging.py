@@ -1,8 +1,8 @@
-"""Log history, configuration, and diagnostic endpoints.
+"""Log history, data management, and diagnostic endpoints.
 
 Serves historical log entries from the database when available, falling back
-to the in-memory ring buffer in the ``LogPersister`` otherwise.  This means
-the Logging page always has *some* history, even when there is no DB.
+to the in-memory ring buffer in the ``LogPersister`` otherwise.  Provides
+configuration for retention rollover and purge for ALL accumulating tables.
 """
 
 from __future__ import annotations
@@ -40,16 +40,18 @@ class LogHistoryResponse(BaseModel):
 
 class LoggingConfigResponse(BaseModel):
     log_rollover_days: int
+    data_rollover_days: int
 
 
 class LoggingConfigUpdate(BaseModel):
     log_rollover_days: int | None = None
+    data_rollover_days: int | None = None
 
 
-class PurgeLogsResponse(BaseModel):
-    audit_log_deleted: int
-    log_entries_deleted: int
+class PurgeResponse(BaseModel):
+    tables_cleared: dict[str, int]
     memory_cleared: int
+    total_deleted: int
 
 
 # ---- Helpers ----
@@ -186,26 +188,30 @@ async def log_history(
 
 @router.get("/config", response_model=LoggingConfigResponse)
 async def get_logging_config() -> LoggingConfigResponse:
-    """Get logging configuration (rollover days)."""
+    """Get data management configuration (rollover days)."""
     from ctrade.core.config_store import RuntimeConfigStore
 
     try:
         cfg = RuntimeConfigStore.get().get_logging_config()
-        return LoggingConfigResponse(log_rollover_days=cfg.get("log_rollover_days", 7))
+        return LoggingConfigResponse(
+            log_rollover_days=cfg.get("log_rollover_days", 7),
+            data_rollover_days=cfg.get("data_rollover_days", 30),
+        )
     except Exception:
-        return LoggingConfigResponse(log_rollover_days=7)
+        return LoggingConfigResponse(log_rollover_days=7, data_rollover_days=30)
 
 
 @router.put("/config", response_model=LoggingConfigResponse)
 async def update_logging_config(body: LoggingConfigUpdate) -> LoggingConfigResponse:
-    """Update logging configuration (rollover days)."""
+    """Update data management configuration (rollover days)."""
     from ctrade.core.config_store import RuntimeConfigStore
     from ctrade.db.log_persister import LogPersister
 
     updates: dict = {}
     if body.log_rollover_days is not None:
-        days = max(1, min(body.log_rollover_days, 365))
-        updates["log_rollover_days"] = days
+        updates["log_rollover_days"] = max(1, min(body.log_rollover_days, 365))
+    if body.data_rollover_days is not None:
+        updates["data_rollover_days"] = max(1, min(body.data_rollover_days, 365))
 
     if updates:
         result = RuntimeConfigStore.get().update_logging_config(updates)
@@ -213,31 +219,39 @@ async def update_logging_config(body: LoggingConfigUpdate) -> LoggingConfigRespo
         # Hot-reload retention in LogPersister
         try:
             persister = LogPersister.get_instance()
-            persister.set_retention_days(result.get("log_rollover_days", 7))
+            persister.set_retention_days(
+                log_days=result.get("log_rollover_days"),
+                data_days=result.get("data_rollover_days"),
+            )
         except Exception:
             pass
 
-        _logger.info("Logging config updated: %s", updates)
-        return LoggingConfigResponse(log_rollover_days=result.get("log_rollover_days", 7))
+        _logger.info("Data management config updated: %s", updates)
+        return LoggingConfigResponse(
+            log_rollover_days=result.get("log_rollover_days", 7),
+            data_rollover_days=result.get("data_rollover_days", 30),
+        )
 
     cfg = RuntimeConfigStore.get().get_logging_config()
-    return LoggingConfigResponse(log_rollover_days=cfg.get("log_rollover_days", 7))
+    return LoggingConfigResponse(
+        log_rollover_days=cfg.get("log_rollover_days", 7),
+        data_rollover_days=cfg.get("data_rollover_days", 30),
+    )
 
 
-@router.post("/purge", response_model=PurgeLogsResponse)
-async def purge_logs() -> PurgeLogsResponse:
-    """Purge all log entries from both database tables and the in-memory buffer.
+@router.post("/purge", response_model=PurgeResponse)
+async def purge_all_data() -> PurgeResponse:
+    """Purge ALL accumulated data from every accumulating database table.
 
-    Deletes all rows from ``audit_log`` and ``log_entries`` tables.
-    Clears both the in-memory ring buffer AND the pending DB flush buffer
-    so the next flush cycle doesn't re-populate the tables.
+    Deletes all rows from: audit_log, log_entries, signals, orders, positions,
+    candles, sentiment_data, onchain_metrics, portfolio_snapshots, alert_history.
+    Also clears the in-memory log ring buffer and pending DB flush buffer.
     """
     from ctrade.db.log_persister import LogPersister
     from ctrade.db.persistence import is_db_ready, run_simple_db_operation
 
-    audit_deleted = 0
-    entries_deleted = 0
     memory_cleared = 0
+    tables_cleared: dict[str, int] = {}
 
     # Clear in-memory ring buffer AND the pending DB flush buffer
     try:
@@ -246,30 +260,56 @@ async def purge_logs() -> PurgeLogsResponse:
     except Exception:
         pass
 
-    # Clear DB tables
+    # Clear ALL accumulating DB tables
     if is_db_ready():
         async def _purge(session):  # type: ignore[no-untyped-def]
             from sqlalchemy import delete
 
-            from ctrade.db.models import AuditLogModel, LogEntryModel
+            from ctrade.db.models import (
+                AlertHistoryModel,
+                AuditLogModel,
+                CandleModel,
+                LogEntryModel,
+                OnChainMetricModel,
+                OrderModel,
+                PortfolioSnapshotModel,
+                PositionModel,
+                SentimentDataModel,
+                SignalModel,
+            )
 
-            r1 = await session.execute(delete(AuditLogModel))
-            r2 = await session.execute(delete(LogEntryModel))
-            return (r1.rowcount or 0, r2.rowcount or 0)
+            counts: dict[str, int] = {}
+            for name, model in [
+                ("log_entries", LogEntryModel),
+                ("audit_log", AuditLogModel),
+                ("signals", SignalModel),
+                ("orders", OrderModel),
+                ("positions", PositionModel),
+                ("candles", CandleModel),
+                ("sentiment_data", SentimentDataModel),
+                ("onchain_metrics", OnChainMetricModel),
+                ("portfolio_snapshots", PortfolioSnapshotModel),
+                ("alert_history", AlertHistoryModel),
+            ]:
+                r = await session.execute(delete(model))
+                counts[name] = r.rowcount or 0
+            return counts
 
-        result = await run_simple_db_operation(_purge, description="purge all log tables")
+        result = await run_simple_db_operation(_purge, description="purge all accumulating tables")
         if result:
-            audit_deleted, entries_deleted = result
+            tables_cleared = result
+
+    total_deleted = sum(tables_cleared.values()) + memory_cleared
 
     _logger.info(
-        "Logs purged: audit_log=%d, log_entries=%d, memory=%d",
-        audit_deleted, entries_deleted, memory_cleared,
+        "Full data purge: %d total rows deleted across %d tables + %d in-memory",
+        sum(tables_cleared.values()), len([v for v in tables_cleared.values() if v > 0]), memory_cleared,
     )
 
-    return PurgeLogsResponse(
-        audit_log_deleted=audit_deleted,
-        log_entries_deleted=entries_deleted,
+    return PurgeResponse(
+        tables_cleared=tables_cleared,
         memory_cleared=memory_cleared,
+        total_deleted=total_deleted,
     )
 
 

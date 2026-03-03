@@ -103,10 +103,10 @@ export function useUpdateLoggingConfig() {
   });
 }
 
-export function usePurgeLogs() {
+export function usePurgeAllData() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.purgeLogs(),
+    mutationFn: () => api.purgeAllData(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['config', 'logging'] });
     },

@@ -556,18 +556,20 @@ export interface LogHistoryResponse {
   has_more: boolean;
 }
 
-// ---- Logging Config ----
+// ---- Data Management Config ----
 
 export interface LoggingConfig {
   log_rollover_days: number;
+  data_rollover_days: number;
 }
 
 export interface LoggingConfigUpdate {
   log_rollover_days?: number;
+  data_rollover_days?: number;
 }
 
-export interface PurgeLogsResponse {
-  audit_log_deleted: number;
-  log_entries_deleted: number;
+export interface PurgeResponse {
+  tables_cleared: Record<string, number>;
   memory_cleared: number;
+  total_deleted: number;
 }
