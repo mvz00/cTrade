@@ -4,16 +4,65 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
+from datetime import datetime, timezone
+from typing import Any
 
 import structlog
 
 
-def setup_logging(log_level: str = "INFO", json_output: bool = False) -> None:
+class WebSocketLogHandler(logging.Handler):
+    """Logging handler that publishes log records to the EventBus.
+
+    Records are forwarded as ``log.entry`` events and reach WebSocket
+    clients via the existing EventBus → WebSocket pipeline.
+
+    A thread-local guard prevents infinite recursion when the EventBus
+    or WebSocket code itself emits log messages.
+    """
+
+    _local = threading.local()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Guard against recursion
+        if getattr(self._local, "emitting", False):
+            return
+        self._local.emitting = True
+        try:
+            from ctrade.core.events import Event, EventBus, EventTypes
+
+            bus = EventBus._instance  # noqa: SLF001 — avoid get_instance() to skip init
+            if bus is None:
+                return
+
+            data: dict[str, Any] = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                "module": record.module,
+                "func": record.funcName,
+                "lineno": record.lineno,
+            }
+
+            bus.publish_nowait(Event(event_type=EventTypes.LOG_ENTRY, data=data))
+        except Exception:
+            pass  # Never let logging handler errors propagate
+        finally:
+            self._local.emitting = False
+
+
+def setup_logging(
+    log_level: str = "INFO",
+    json_output: bool = False,
+    enable_ws_handler: bool = True,
+) -> None:
     """Configure structured logging for the application.
 
     Args:
         log_level: Minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
         json_output: If True, output logs as JSON. If False, use human-readable console format.
+        enable_ws_handler: If True, attach a handler that streams logs to WebSocket clients.
     """
     level = getattr(logging, log_level.upper(), logging.INFO)
 
@@ -57,6 +106,12 @@ def setup_logging(log_level: str = "INFO", json_output: bool = False) -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
+
+    # Stream logs to WebSocket clients via EventBus
+    if enable_ws_handler:
+        ws_handler = WebSocketLogHandler()
+        ws_handler.setLevel(level)
+        root_logger.addHandler(ws_handler)
 
     # Quiet noisy libraries
     logging.getLogger("ccxt").setLevel(logging.WARNING)

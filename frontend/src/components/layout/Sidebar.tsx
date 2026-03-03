@@ -8,6 +8,7 @@ import {
   Brain,
   Flame,
   Bell,
+  ScrollText,
   UserCog,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +26,7 @@ const navItems = [
   { to: ROUTES.INTELLIGENCE, icon: Brain, label: 'Intelligence' },
   { to: ROUTES.SCREENER, icon: Flame, label: 'Screener' },
   { to: ROUTES.ALERTS, icon: Bell, label: 'Alerts' },
+  { to: ROUTES.LOGGING, icon: ScrollText, label: 'Logging' },
 ];
 
 export function Sidebar() {

@@ -32,6 +32,7 @@ _FORWARDED_EVENTS: list[str] = [
     EventTypes.TICKER_UPDATE,
     EventTypes.SENTIMENT_UPDATE,
     EventTypes.ONCHAIN_UPDATE,
+    EventTypes.LOG_ENTRY,
 ]
 
 

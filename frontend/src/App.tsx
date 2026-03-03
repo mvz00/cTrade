@@ -7,6 +7,7 @@ import { ConfigPage } from '@/pages/Configuration/ConfigPage';
 import { ConnectionsPage } from '@/pages/Connections/ConnectionsPage';
 import { SignalsPage } from '@/pages/Signals/SignalsPage';
 import { AlertsPage } from '@/pages/Alerts/AlertsPage';
+import { LoggingPage } from '@/pages/Logging/LoggingPage';
 import { AccountPage } from '@/pages/Account/AccountPage';
 import { ScreenerPage } from '@/pages/Screener/ScreenerPage';
 import { IntelligencePage } from '@/pages/Intelligence/IntelligencePage';
@@ -55,6 +56,7 @@ export function App() {
             <Route path={ROUTES.INTELLIGENCE} element={<IntelligencePage />} />
             <Route path={ROUTES.SCREENER} element={<ScreenerPage />} />
             <Route path={ROUTES.ALERTS} element={<AlertsPage />} />
+            <Route path={ROUTES.LOGGING} element={<LoggingPage />} />
             <Route path={ROUTES.ACCOUNT} element={<AccountPage />} />
           </Route>
         </Routes>
