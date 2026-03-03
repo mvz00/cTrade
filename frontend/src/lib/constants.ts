@@ -8,6 +8,7 @@ export const ROUTES = {
   INTELLIGENCE: '/intelligence',
   SCREENER: '/screener',
   ALERTS: '/alerts',
+  LOGGING: '/logging',
   ACCOUNT: '/account',
 } as const;
 

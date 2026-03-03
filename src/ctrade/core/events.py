@@ -171,6 +171,9 @@ class EventTypes:
     # Alerts
     ALERT_TRIGGERED = "alert.triggered"
 
+    # Logging
+    LOG_ENTRY = "log.entry"
+
     # System
     SYSTEM_STARTUP = "system.startup"
     SYSTEM_SHUTDOWN = "system.shutdown"
