@@ -126,6 +126,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"[cTrade] [4/6] WebSocket forwarder FAILED (non-fatal): {e}", flush=True)
 
+    # --- Step 4b: Log persistence ---
+    log_persister = None
+    try:
+        if _event_bus and _db_available:
+            from ctrade.core.events import EventTypes
+            from ctrade.db.log_persister import LogPersister
+
+            log_persister = LogPersister.get_instance()
+            _event_bus.subscribe(EventTypes.LOG_ENTRY, log_persister.handle_log_event)
+            await log_persister.start()
+            print("[cTrade]        Log persister started (batch writes to DB)", flush=True)
+    except Exception as e:
+        print(f"[cTrade]        Log persister FAILED (non-fatal): {e}", flush=True)
+
     # --- Step 5: Data feeds ---
     try:
         if settings.feeds_enabled:
@@ -293,6 +307,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _event_bus.stop()
     except Exception as e:
         print(f"[cTrade] Event bus shutdown error: {e}", flush=True)
+
+    # Flush remaining log entries after event bus stops dispatching
+    try:
+        if log_persister is not None:
+            await log_persister.stop()
+            print("[cTrade] Log persister stopped", flush=True)
+    except Exception as e:
+        print(f"[cTrade] Log persister shutdown error: {e}", flush=True)
 
     try:
         if _db_available:

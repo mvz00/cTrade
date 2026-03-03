@@ -51,6 +51,7 @@ import type {
   PortfolioHistorySeries,
   SymbolCandleSeries,
   RecommendationsResponse,
+  LogHistoryResponse,
 } from './types';
 
 const API_BASE = '/api/v1';
@@ -242,4 +243,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+
+  // ---- Logging ----
+  logHistory: (params?: { level?: string; search?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.level) qs.set('level', params.level);
+    if (params?.search) qs.set('search', params.search);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    const q = qs.toString();
+    return apiFetch<LogHistoryResponse>(`/logging/history${q ? `?${q}` : ''}`);
+  },
 };

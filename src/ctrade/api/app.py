@@ -18,12 +18,12 @@ from ctrade.api.middleware import setup_middleware
 from ctrade.api.routers import (
     alerts,
     auth,
-
     config,
     connections,
     dashboard,
     exchanges,
     health,
+    logging as logging_router,
     onchain,
     screener,
     sentiment,
@@ -190,6 +190,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(sentiment.router, prefix="/api/v1")
     app.include_router(onchain.router, prefix="/api/v1")
     app.include_router(connections.router, prefix="/api/v1")
+    app.include_router(logging_router.router, prefix="/api/v1")
 
     # WebSocket
     app.include_router(ws_router, prefix="/api/v1")

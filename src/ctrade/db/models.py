@@ -281,6 +281,26 @@ class AuditLogModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
 
 
+class LogEntryModel(Base):
+    """Persisted application log entries."""
+
+    __tablename__ = "log_entries"
+    __table_args__ = (
+        Index("ix_log_entries_timestamp", "timestamp"),
+        Index("ix_log_entries_level_ts", "level", "timestamp"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    level: Mapped[str] = mapped_column(String(10), nullable=False)
+    logger: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    module: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    func: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    lineno: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now)
+
+
 class ApiCredentialModel(Base):
     """Encrypted exchange API credentials."""
 

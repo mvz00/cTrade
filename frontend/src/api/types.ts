@@ -536,3 +536,22 @@ export interface PortfolioHistorySeries {
   exchange_name: string;
   points: PortfolioHistoryPoint[];
 }
+
+// ---- Log History ----
+
+export interface LogHistoryEntry {
+  id: number;
+  timestamp: string;
+  level: string;
+  logger: string;
+  message: string;
+  module: string;
+  func: string;
+  lineno: number;
+}
+
+export interface LogHistoryResponse {
+  entries: LogHistoryEntry[];
+  total: number;
+  has_more: boolean;
+}
