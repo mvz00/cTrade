@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
-  ScrollText, Trash2, Pause, Play, Search, ChevronDown, Zap,
+  ScrollText, Trash2, Pause, Play, Search, ChevronDown, Zap, Download,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
@@ -40,15 +40,32 @@ const LEVEL_BADGE: Record<string, 'default' | 'info' | 'success' | 'warning' | '
   CRITICAL: 'danger',
 };
 
+const LEVEL_TOGGLE_COLORS: Record<string, { active: string; inactive: string }> = {
+  DEBUG: { active: 'bg-ct-text-dim/20 text-ct-text-dim border-ct-text-dim/40', inactive: 'bg-ct-bg text-ct-text-dim/40 border-ct-border' },
+  INFO: { active: 'bg-ct-blue/20 text-ct-blue border-ct-blue/40', inactive: 'bg-ct-bg text-ct-blue/30 border-ct-border' },
+  WARNING: { active: 'bg-ct-yellow/20 text-ct-yellow border-ct-yellow/40', inactive: 'bg-ct-bg text-ct-yellow/30 border-ct-border' },
+  ERROR: { active: 'bg-ct-red/20 text-ct-red border-ct-red/40', inactive: 'bg-ct-bg text-ct-red/30 border-ct-border' },
+  CRITICAL: { active: 'bg-ct-red/30 text-ct-red border-ct-red/50', inactive: 'bg-ct-bg text-ct-red/30 border-ct-border' },
+};
+
+const EXPORT_RANGES = [
+  { label: 'Last 5 min', minutes: 5 },
+  { label: 'Last 15 min', minutes: 15 },
+  { label: 'Last 1 hour', minutes: 60 },
+  { label: 'All entries', minutes: 0 },
+] as const;
+
 let nextId = 0;
 
 export function LoggingPage() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [minLevel, setMinLevel] = useState<Level>('DEBUG');
+  const [enabledLevels, setEnabledLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [searchText, setSearchText] = useState('');
   const [paused, setPaused] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
@@ -92,10 +109,34 @@ export function LoggingPage() {
     setAutoScroll(atBottom);
   }, []);
 
-  const minLevelIdx = LEVELS.indexOf(minLevel);
+  // Close export menu on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    }
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }
+  }, [showExportMenu]);
+
+  const toggleLevel = (level: Level) => {
+    setEnabledLevels(prev => {
+      const next = new Set(prev);
+      if (next.has(level)) {
+        // Don't allow disabling all levels
+        if (next.size > 1) next.delete(level);
+      } else {
+        next.add(level);
+      }
+      return next;
+    });
+  };
+
   const filtered = entries.filter(e => {
-    const levelIdx = LEVELS.indexOf(e.level as Level);
-    if (levelIdx < minLevelIdx) return false;
+    if (!enabledLevels.has(e.level as Level)) return false;
     if (searchText) {
       const lower = searchText.toLowerCase();
       return (
@@ -123,6 +164,49 @@ export function LoggingPage() {
     }
   }
 
+  function exportCSV(minutes: number) {
+    const now = Date.now();
+    const cutoff = minutes > 0 ? now - minutes * 60_000 : 0;
+
+    const toExport = entries.filter(e => {
+      if (cutoff > 0) {
+        try {
+          return new Date(e.timestamp).getTime() >= cutoff;
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const rows = [
+      ['timestamp', 'level', 'logger', 'message', 'module', 'func', 'lineno'].join(','),
+      ...toExport.map(e =>
+        [
+          e.timestamp,
+          e.level,
+          `"${e.logger}"`,
+          `"${e.message.replace(/"/g, '""')}"`,
+          e.module,
+          e.func,
+          e.lineno,
+        ].join(','),
+      ),
+    ].join('\n');
+
+    const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const d = new Date();
+    const filename = `ctrade-logs-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}.csv`;
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)]">
       <PageHeader
@@ -146,21 +230,28 @@ export function LoggingPage() {
       {/* Controls */}
       <Card className="mb-4">
         <div className="flex flex-wrap items-center gap-3">
-          {/* Level filter */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-ct-text-muted">Level:</label>
-            <div className="relative">
-              <select
-                value={minLevel}
-                onChange={e => setMinLevel(e.target.value as Level)}
-                className="bg-ct-bg border border-ct-border rounded-lg px-3 py-1.5 text-sm text-ct-text appearance-none pr-8"
-              >
-                {LEVELS.map(l => (
-                  <option key={l} value={l}>{l}{counts[l] ? ` (${counts[l]})` : ''}</option>
-                ))}
-              </select>
-              <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-ct-text-dim pointer-events-none" />
-            </div>
+          {/* Level toggle buttons */}
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-ct-text-muted mr-1">Levels:</label>
+            {LEVELS.map(level => {
+              const active = enabledLevels.has(level);
+              const colors = LEVEL_TOGGLE_COLORS[level];
+              return (
+                <button
+                  key={level}
+                  onClick={() => toggleLevel(level)}
+                  className={cn(
+                    'px-2 py-1 rounded text-xs font-medium border transition-colors',
+                    active ? colors.active : colors.inactive,
+                    !active && 'opacity-50',
+                  )}
+                  title={active ? `Hide ${level} logs` : `Show ${level} logs`}
+                >
+                  {level}
+                  {counts[level] ? ` (${counts[level]})` : ''}
+                </button>
+              );
+            })}
           </div>
 
           {/* Search */}
@@ -202,6 +293,32 @@ export function LoggingPage() {
             <Zap size={14} />
             Test
           </button>
+
+          {/* Export dropdown */}
+          <div className="relative" ref={exportRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              disabled={entries.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-ct-bg-hover text-ct-text-muted hover:text-ct-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={14} />
+              Export
+              <ChevronDown size={12} />
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-ct-bg-card border border-ct-border rounded-lg shadow-lg py-1 z-20 min-w-[140px]">
+                {EXPORT_RANGES.map(range => (
+                  <button
+                    key={range.label}
+                    onClick={() => exportCSV(range.minutes)}
+                    className="w-full text-left px-3 py-1.5 text-sm text-ct-text hover:bg-ct-bg-hover transition-colors"
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => { setEntries([]); nextId = 0; }}

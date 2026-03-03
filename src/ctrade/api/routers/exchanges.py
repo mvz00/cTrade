@@ -129,6 +129,7 @@ async def add_exchange(
     )
     # New exchange → refresh available pairs from it
     MarketDataProvider.get_instance().clear_pairs_cache()
+    logger.info("Exchange added: %s", body.name)
     return ExchangeResponse(**result)
 
 
@@ -143,6 +144,7 @@ async def toggle_exchange(exchange_id: str) -> ExchangeResponse:
     market = MarketDataProvider.get_instance()
     market.clear_pairs_cache()
     market.clear_ticker_cache()
+    logger.info("Exchange toggled: %s (active=%s)", exchange_id, result.get("active"))
     return ExchangeResponse(**result)
 
 
@@ -154,6 +156,7 @@ async def delete_exchange(exchange_id: str) -> None:
         raise HTTPException(status_code=404, detail="Exchange not found")
     # Exchange removed → refresh available pairs
     MarketDataProvider.get_instance().clear_pairs_cache()
+    logger.info("Exchange deleted: %s", exchange_id)
 
 
 @router.put("/{exchange_id}", response_model=ExchangeResponse)
@@ -194,6 +197,7 @@ async def update_exchange(
         MarketDataProvider.get_instance().clear_pairs_cache()
     if result is None:
         raise HTTPException(status_code=404, detail="Exchange not found")
+    logger.info("Exchange updated: %s", exchange_id)
     return ExchangeResponse(**result)
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 
 from ctrade.api.schemas.alerts import (
@@ -10,6 +12,8 @@ from ctrade.api.schemas.alerts import (
     CreateAlertRequest,
 )
 from ctrade.notifications.alert_manager import AlertManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -31,6 +35,7 @@ async def create_alert(body: CreateAlertRequest) -> AlertConfigResponse:
         value=body.value,
         message=body.message,
     )
+    logger.info("Alert created: %s %s", body.alert_type, body.symbol or "")
     return AlertConfigResponse(**result)
 
 
@@ -40,6 +45,7 @@ async def delete_alert(alert_id: str) -> None:
     mgr = AlertManager.get_instance()
     if not mgr.delete_alert(alert_id):
         raise HTTPException(status_code=404, detail="Alert not found")
+    logger.info("Alert deleted: %s", alert_id)
 
 
 @router.put("/{alert_id}/toggle", response_model=AlertConfigResponse)
@@ -49,6 +55,7 @@ async def toggle_alert(alert_id: str) -> AlertConfigResponse:
     result = mgr.toggle_alert(alert_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Alert not found")
+    logger.info("Alert toggled: %s (enabled=%s)", alert_id, result.get("enabled"))
     return AlertConfigResponse(**result)
 
 

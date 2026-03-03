@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["connections"])
 
@@ -101,5 +104,6 @@ async def update_connection_credentials(
     vault = Vault(encryption_key)
     store = RuntimeConfigStore.get()
     store.set_feed_credentials(name, non_empty, vault)
+    logger.info("Connection credentials updated: %s", name)
 
     return {"message": f"Credentials for {name} updated successfully"}

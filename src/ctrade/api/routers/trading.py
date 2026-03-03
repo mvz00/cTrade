@@ -34,6 +34,7 @@ from ctrade.exchange.paper_engine import PaperEngine
 from ctrade.strategy.orchestrator import TradingOrchestrator
 
 router = APIRouter(prefix="/trading", tags=["trading"])
+logger = logging.getLogger(__name__)
 
 
 # ---- Watched Pairs (shared — always use PaperEngine) ----
@@ -51,6 +52,7 @@ async def add_pair(body: AddPairRequest) -> PairResponse:
     engine = PaperEngine.get_instance()
     if not engine.add_watched_pair(body.symbol):
         raise HTTPException(status_code=409, detail=f"Pair {body.symbol} already watched")
+    logger.info("Pair added: %s", body.symbol)
     return PairResponse(symbol=body.symbol)
 
 
@@ -62,6 +64,8 @@ async def add_pairs_batch(body: AddPairsBatchRequest) -> list[PairResponse]:
     for symbol in body.symbols:
         if engine.add_watched_pair(symbol):
             added.append(PairResponse(symbol=symbol))
+    if added:
+        logger.info("Pairs added: %s", [p.symbol for p in added])
     return added
 
 
@@ -71,13 +75,16 @@ async def remove_pair(symbol: str) -> None:
     engine = PaperEngine.get_instance()
     if not engine.remove_watched_pair(symbol):
         raise HTTPException(status_code=404, detail=f"Pair {symbol} not found")
+    logger.info("Pair removed: %s", symbol)
 
 
 @router.delete("/pairs", status_code=200)
 async def remove_all_pairs() -> dict[str, int]:
     """Remove all watched pairs."""
     engine = PaperEngine.get_instance()
-    return {"removed": engine.clear_all_watched_pairs()}
+    count = engine.clear_all_watched_pairs()
+    logger.info("All pairs removed (%d)", count)
+    return {"removed": count}
 
 
 # ---- Available Pairs ----
@@ -140,6 +147,7 @@ async def place_order(body: PlaceOrderRequest) -> OrderResponse:
         exchange_name=exchange_name,
         exchange_id=exchange_id,
     )
+    logger.info("Order placed: %s %s %s qty=%.6f", body.side, body.order_type, body.symbol, body.quantity)
     return OrderResponse(**engine._order_to_dict(order))
 
 
@@ -225,6 +233,8 @@ async def quick_buy(body: QuickBuyRequest) -> QuickBuyResponse:
          "strategy": "manual_quick_buy", "status": order_status},
     )
 
+    logger.info("Quick buy: %s $%.2f @ $%.4f → %s", body.symbol, amount_usdt, price, order_status)
+
     if order_status == "rejected":
         return QuickBuyResponse(
             success=False, symbol=body.symbol, quantity=quantity,
@@ -285,6 +295,7 @@ async def close_all_positions() -> dict[str, Any]:
         except Exception as e:
             errors.append(f"{pos['pair_symbol']}: {e}")
 
+    logger.info("Close all positions: %d closed, %d failed", len(results), len(errors))
     return {
         "closed": len(results),
         "failed": len(errors),
@@ -300,6 +311,7 @@ async def close_position(position_id: str) -> OrderResponse:
     order = await engine.close_position(position_id)
     if not order:
         raise HTTPException(status_code=404, detail="Position not found or already closed")
+    logger.info("Position closed: %s", position_id)
     order_dict = engine._order_to_dict(order)
     if order.status == "rejected":
         raise HTTPException(
@@ -377,8 +389,6 @@ async def get_ticker(symbol: str) -> TickerResponse:
     )
 
 
-logger = logging.getLogger(__name__)
-
 
 # ---- Candles (batch) ----
 
@@ -428,7 +438,9 @@ async def activity_log() -> list[ActivityEntry]:
 async def clear_activity() -> dict[str, int]:
     """Clear the activity log."""
     orch = TradingOrchestrator.get_instance()
-    return {"cleared": orch.clear_activity_log()}
+    count = orch.clear_activity_log()
+    logger.info("Activity log cleared (%d entries)", count)
+    return {"cleared": count}
 
 
 # ---- Engine Control ----
@@ -448,6 +460,7 @@ async def start_engine(body: EngineStartRequest | None = None) -> EngineStatusRe
     started = await orch.start(interval=interval)
     if not started:
         raise HTTPException(status_code=409, detail="Engine already running")
+    logger.info("Trading engine started")
     return EngineStatusResponse(**orch.get_status())
 
 
@@ -458,6 +471,7 @@ async def stop_engine() -> EngineStatusResponse:
     stopped = await orch.stop()
     if not stopped:
         raise HTTPException(status_code=409, detail="Engine not running")
+    logger.info("Trading engine stopped")
     return EngineStatusResponse(**orch.get_status())
 
 
@@ -477,5 +491,6 @@ async def reset_paper_engine() -> dict[str, Any]:
 
     engine = PaperEngine.get_instance()
     await engine.reset_to_defaults()
+    logger.info("Paper engine reset")
 
     return {"success": True, "balance": 10_000.0, "message": "Paper trading reset to $10,000"}
