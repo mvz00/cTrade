@@ -3,6 +3,7 @@ import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/cn';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
+import { BottomTabBar } from './BottomTabBar';
 
 function AppLayoutInner() {
   const { collapsed, mobileOpen, setMobileOpen } = useSidebar();
@@ -26,10 +27,13 @@ function AppLayoutInner() {
         )}
       >
         <TopBar />
-        <main className="flex-1 p-4 md:p-6 overflow-auto">
+        <main className="flex-1 p-4 md:p-6 pb-24 md:pb-6 overflow-auto">
           <Outlet />
         </main>
       </div>
+
+      {/* Bottom tab bar — mobile only */}
+      <BottomTabBar />
     </div>
   );
 }

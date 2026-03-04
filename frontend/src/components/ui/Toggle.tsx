@@ -38,13 +38,13 @@ export function Toggle({
           aria-checked={checked}
           onClick={() => onChange(!checked)}
           className={cn(
-            'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+            'relative inline-flex h-7 w-12 md:h-6 md:w-11 items-center rounded-full transition-colors',
             checked ? 'bg-ct-accent' : 'bg-ct-border'
           )}
         >
           <span
             className={cn(
-              'inline-block h-4 w-4 rounded-full bg-white transition-transform',
+              'inline-block h-5 w-5 md:h-4 md:w-4 rounded-full bg-white transition-transform',
               checked ? 'translate-x-6' : 'translate-x-1'
             )}
           />

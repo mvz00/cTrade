@@ -51,13 +51,9 @@ export function Sidebar() {
     <aside
       className={cn(
         'fixed left-0 top-0 h-screen bg-ct-bg-card border-r border-ct-border',
-        'flex flex-col z-20 transition-all duration-200',
-        // Width: always w-56 on mobile, w-56/w-16 on desktop
-        collapsed ? 'w-56 md:w-16' : 'w-56',
-        // Mobile: off-screen by default, slides in when mobileOpen
-        mobileOpen ? 'translate-x-0' : '-translate-x-full',
-        // Desktop: always visible regardless of mobileOpen
-        'md:translate-x-0',
+        'hidden md:flex flex-col z-20 transition-all duration-200',
+        // Width: w-56 or w-16 on desktop (hidden on mobile — bottom tabs handle nav)
+        collapsed ? 'md:w-16' : 'md:w-56',
       )}
     >
       {/* Logo */}
@@ -127,14 +123,6 @@ export function Sidebar() {
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           {!collapsed && <span className="text-xs">Collapse</span>}
-        </button>
-        {/* Mobile: close button */}
-        <button
-          onClick={() => setMobileOpen(false)}
-          className="w-full flex md:hidden items-center justify-center gap-2 px-3 py-2 rounded-lg text-ct-text-dim hover:text-ct-text-muted hover:bg-ct-bg-hover transition-colors"
-        >
-          <ChevronLeft size={16} />
-          <span className="text-xs">Close</span>
         </button>
         <div className={cn('text-center text-[10px] text-ct-text-dim mt-1', collapsed && 'md:hidden')}>
           v0.1.0

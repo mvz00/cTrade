@@ -1,18 +1,15 @@
-import { Menu } from 'lucide-react';
 import { useHealth } from '@/api/hooks/useHealth';
 import { useTradingMode, useUpdateTradingMode } from '@/api/hooks/useConfig';
 import { Badge } from '@/components/ui/Badge';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog, useConfirm } from '@/components/ui/ConfirmDialog';
-import { useSidebar } from '@/contexts/SidebarContext';
 import { UserDropdown } from './UserDropdown';
 
 export function TopBar() {
   const health = useHealth();
   const tradingMode = useTradingMode();
   const updateMode = useUpdateTradingMode();
-  const { setMobileOpen } = useSidebar();
   const { toast } = useToast();
   const { confirm, dialogProps } = useConfirm();
 
@@ -43,15 +40,13 @@ export function TopBar() {
 
   return (
     <>
-      <header className="h-14 bg-ct-bg-card border-b border-ct-border flex items-center justify-between px-4 md:px-6">
-        {/* Hamburger menu — mobile only */}
-        <button
-          className="md:hidden p-2 -ml-1 rounded-lg text-ct-text-muted hover:text-ct-text hover:bg-ct-bg-hover transition-colors"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-        >
-          <Menu size={20} />
-        </button>
+      <header className="h-14 pt-safe bg-ct-bg-card border-b border-ct-border flex items-center justify-between px-4 md:px-6">
+        {/* Mobile: app brand */}
+        <div className="md:hidden flex items-center gap-2">
+          <span className="text-sm font-bold bg-gradient-to-r from-ct-accent to-ct-blue bg-clip-text text-transparent">
+            cTrade
+          </span>
+        </div>
         {/* Desktop spacer */}
         <div className="hidden md:block" />
 

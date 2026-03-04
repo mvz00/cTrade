@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
 
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
@@ -27,5 +28,14 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    plugin(function ({ addUtilities }) {
+      addUtilities({
+        '.pt-safe': { paddingTop: 'env(safe-area-inset-top)' },
+        '.pb-safe': { paddingBottom: 'env(safe-area-inset-bottom)' },
+        '.pl-safe': { paddingLeft: 'env(safe-area-inset-left)' },
+        '.pr-safe': { paddingRight: 'env(safe-area-inset-right)' },
+      });
+    }),
+  ],
 } satisfies Config;

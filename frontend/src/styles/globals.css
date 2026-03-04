@@ -10,5 +10,44 @@
 
   body {
     @apply bg-ct-bg text-ct-text min-h-screen;
+    -webkit-tap-highlight-color: transparent;
   }
+}
+
+/* ── Mobile-only overrides (below md: breakpoint) ── */
+@media (max-width: 767px) {
+  /* 44px minimum touch targets for buttons (exclude toggle switches) */
+  button:not([role="switch"]),
+  [role="button"] {
+    min-height: 44px;
+  }
+
+  /* 44px minimum for inputs + prevent iOS auto-zoom on focus */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+
+  /* iOS-style grouped card radius */
+  .bg-ct-bg-card {
+    border-radius: 0.875rem;
+  }
+}
+
+/* ── Sheet slide-up animation ── */
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-in-from-bottom 0.2s ease-out;
 }
