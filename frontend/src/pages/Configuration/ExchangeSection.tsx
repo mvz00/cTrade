@@ -367,7 +367,7 @@ export function ExchangeSection() {
     })();
 
   return (
-    <Card className="lg:col-span-2">
+    <Card>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-ct-blue/10">
