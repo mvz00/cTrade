@@ -1,4 +1,4 @@
-import { formatUSD } from '@/lib/formatters';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import type { Portfolio } from '@/api/types';
 
 interface PortfolioDonutProps {
@@ -12,6 +12,7 @@ interface Segment {
 }
 
 export function PortfolioDonut({ portfolio }: PortfolioDonutProps) {
+  const { formatMoney } = useCurrency();
   const positionsValue = portfolio.positions_value ?? 0;
   const unrealizedPnl = portfolio.unrealized_pnl ?? 0;
   const total = portfolio.total_value_usd ?? 0;
@@ -102,7 +103,7 @@ export function PortfolioDonut({ portfolio }: PortfolioDonutProps) {
         {/* Center text */}
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-xs text-ct-text-dim">Total</span>
-          <span className="text-lg font-semibold text-ct-text">{formatUSD(total)}</span>
+          <span className="text-lg font-semibold text-ct-text">{formatMoney(total)}</span>
         </div>
       </div>
 
@@ -120,8 +121,8 @@ export function PortfolioDonut({ portfolio }: PortfolioDonutProps) {
             <div className="flex items-center gap-3">
               <span className="text-ct-text font-medium">
                 {arc.label === 'Unrealized P&L'
-                  ? (unrealizedPnl >= 0 ? '+' : '-') + formatUSD(arc.value)
-                  : formatUSD(arc.value)}
+                  ? (unrealizedPnl >= 0 ? '+' : '-') + formatMoney(arc.value)
+                  : formatMoney(arc.value)}
               </span>
               <span className="text-ct-text-dim text-xs w-10 text-right">
                 {(arc.pct * 100).toFixed(1)}%

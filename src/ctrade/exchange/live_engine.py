@@ -446,7 +446,7 @@ class LiveEngine:
             filled_qty = result.get("filled") or quantity
             fee_info = result.get("fee") or {}
             fee_cost = fee_info.get("cost") or 0
-            fee_currency = fee_info.get("currency") or "USDT"
+            fee_currency = fee_info.get("currency") or "AUD"
 
             # Kraken (and some exchanges) return average=None for market
             # orders — the fill details arrive asynchronously.  Poll

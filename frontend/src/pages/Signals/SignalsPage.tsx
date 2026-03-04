@@ -13,7 +13,7 @@ export function SignalsPage() {
   const [filterAction, setFilterAction] = useState('');
   const { data: signals, isLoading } = useSignals({ symbol: filterSymbol || undefined, action: filterAction || undefined, limit: 100 });
   const { data: pairs } = usePairs();
-  const selectedSymbol = filterSymbol || (pairs && pairs.length > 0 ? pairs[0].symbol : 'BTC/USDT');
+  const selectedSymbol = filterSymbol || (pairs && pairs.length > 0 ? pairs[0].symbol : 'BTC/AUD');
   const { data: indicatorData } = useIndicators(selectedSymbol);
 
   return (

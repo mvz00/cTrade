@@ -45,7 +45,7 @@ class ExchangeEntry:
     is_active: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # --- Per-exchange settings ---
-    quote_currencies: list[str] = field(default_factory=lambda: ["USDT"])
+    quote_currencies: list[str] = field(default_factory=lambda: ["AUD"])
     max_portfolio_pct: float = 1.0  # max % of exchange balance cTrade can use
     risk_overrides: dict[str, float] = field(default_factory=dict)
 
@@ -403,7 +403,7 @@ class RuntimeConfigStore:
                             ),
                             is_active=ex_data.get("is_active", True),
                             created_at=datetime.fromisoformat(ex_data["created_at"]),
-                            quote_currencies=ex_data.get("quote_currencies", ["USDT"]),
+                            quote_currencies=ex_data.get("quote_currencies", ["AUD"]),
                             max_portfolio_pct=ex_data.get("max_portfolio_pct", 1.0),
                             risk_overrides=ex_data.get("risk_overrides", {}),
                         )
@@ -508,7 +508,7 @@ class RuntimeConfigStore:
                             ),
                             is_active=ex_data.get("is_active", True),
                             created_at=datetime.fromisoformat(ex_data["created_at"]),
-                            quote_currencies=ex_data.get("quote_currencies", ["USDT"]),
+                            quote_currencies=ex_data.get("quote_currencies", ["AUD"]),
                             max_portfolio_pct=ex_data.get("max_portfolio_pct", 1.0),
                             risk_overrides=ex_data.get("risk_overrides", {}),
                         )
@@ -823,7 +823,7 @@ class RuntimeConfigStore:
             api_key_encrypted=vault.encrypt(api_key),
             api_secret_encrypted=vault.encrypt(api_secret),
             passphrase_encrypted=vault.encrypt(passphrase) if passphrase else None,
-            quote_currencies=quote_currencies or ["USDT"],
+            quote_currencies=quote_currencies or ["AUD"],
             max_portfolio_pct=max_portfolio_pct,
             risk_overrides=risk_overrides or {},
         )

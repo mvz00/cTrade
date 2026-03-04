@@ -261,7 +261,7 @@ async def get_recommendations() -> dict[str, Any]:
         trading = store.get_trading()
 
         strategy_mode = strategy.get("strategy_mode", "long_only")
-        quote_currency = trading.get("default_quote_currency", "USDT")
+        quote_currency = trading.get("default_quote_currency", "AUD")
 
         return compute_recommendations(
             strategy_mode=strategy_mode,

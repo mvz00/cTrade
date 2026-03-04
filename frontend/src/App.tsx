@@ -14,6 +14,7 @@ import { IntelligencePage } from '@/pages/Intelligence/IntelligencePage';
 import { LoginPage } from '@/pages/Login/LoginPage';
 import { ToastProvider } from '@/components/ui/Toast';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { CurrencyProvider } from '@/contexts/CurrencyContext';
 import { ROUTES } from '@/lib/constants';
 import type { ReactNode } from 'react';
 
@@ -39,6 +40,7 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+      <CurrencyProvider>
       <ToastProvider>
       <BrowserRouter>
         <Routes>
@@ -62,6 +64,7 @@ export function App() {
         </Routes>
       </BrowserRouter>
       </ToastProvider>
+      </CurrencyProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

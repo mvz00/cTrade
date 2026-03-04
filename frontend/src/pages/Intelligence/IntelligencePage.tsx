@@ -8,6 +8,7 @@ import { useOnChainScore, useOnChainMetrics, useOnChainStatus } from '@/api/hook
 import { usePairs } from '@/api/hooks/useTrading';
 import { useIndicators } from '@/api/hooks/useSignals';
 import { formatRelative, formatNumber } from '@/lib/formatters';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import { Brain, Activity, Link, TrendingUp, Gauge } from 'lucide-react';
 
 function ScoreGauge({ label, score, icon: Icon }: { label: string; score: number | null | undefined; icon: typeof Brain }) {
@@ -38,6 +39,7 @@ function ScoreGauge({ label, score, icon: Icon }: { label: string; score: number
 }
 
 export function IntelligencePage() {
+  const { quoteCurrency } = useCurrency();
   const { data: pairs } = usePairs();
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
 
@@ -55,7 +57,7 @@ export function IntelligencePage() {
   const { data: onchainStatus } = useOnChainStatus();
 
   // Technical (via indicators endpoint)
-  const pairSymbol = `${baseSymbol}/USDT`;
+  const pairSymbol = `${baseSymbol}/${quoteCurrency}`;
   const { data: indicatorData } = useIndicators(pairSymbol);
 
   // Compute tech score from indicators

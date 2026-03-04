@@ -16,6 +16,25 @@ export function formatAUD(value: number): string {
   }).format(value);
 }
 
+const CURRENCY_CONFIG: Record<string, { locale: string; currency: string }> = {
+  AUD: { locale: 'en-AU', currency: 'AUD' },
+  USD: { locale: 'en-US', currency: 'USD' },
+  USDT: { locale: 'en-US', currency: 'USD' },
+  USDC: { locale: 'en-US', currency: 'USD' },
+  EUR: { locale: 'de-DE', currency: 'EUR' },
+  GBP: { locale: 'en-GB', currency: 'GBP' },
+};
+
+export function formatCurrency(value: number, currency: string = 'AUD'): string {
+  const config = CURRENCY_CONFIG[currency] ?? CURRENCY_CONFIG['AUD'];
+  return new Intl.NumberFormat(config.locale, {
+    style: 'currency',
+    currency: config.currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 export function formatPercent(value: number, decimals = 1): string {
   return `${(value * 100).toFixed(decimals)}%`;
 }
