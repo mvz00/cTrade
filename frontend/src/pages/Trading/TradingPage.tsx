@@ -562,7 +562,7 @@ export function TradingPage() {
               onClick={handleStartAutoTrading}
               disabled={isSaving || startEngine.isPending}
             >
-              <Play size={14} /> Start Auto-Trading
+              <Play size={14} /> Start
             </Button>
           )}
           <Button
