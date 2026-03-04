@@ -85,7 +85,7 @@ export function AlertsPage() {
                       <span className="font-mono text-sm text-ct-text">{alert.symbol}</span>
                     </div>
                     <div className="text-xs text-ct-text-dim">
-                      {alert.alert_type.startsWith('price_') && `$${formatNumber(alert.value, 2)}`}
+                      {alert.alert_type.startsWith('price_') && formatMoney(alert.value)}
                       {alert.alert_type.startsWith('signal_') && `Confidence >= ${(alert.value * 100).toFixed(0)}%`}
                       {alert.alert_type.startsWith('pnl_') && `${formatMoney(alert.value)}`}
                       {alert.message && ` — ${alert.message}`}

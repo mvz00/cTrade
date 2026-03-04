@@ -249,7 +249,7 @@ export function TradingPage() {
     quickBuy.mutate({ symbol }, {
       onSuccess: (data) => {
         if (data.success) {
-          toast(`Bought ${data.quantity.toFixed(6)} ${symbol} @ $${data.price.toFixed(2)}`, 'success');
+          toast(`Bought ${data.quantity.toFixed(6)} ${symbol} @ ${formatMoney(data.price)}`, 'success');
         } else {
           toast(data.error || 'Quick buy failed', 'error');
         }
@@ -268,7 +268,7 @@ export function TradingPage() {
       {
         onSuccess: (data) => {
           if (data.success) {
-            toast(`Bought ${data.quantity.toFixed(6)} ${manualSelectedPair} @ $${data.price.toFixed(2)}`, 'success');
+            toast(`Bought ${data.quantity.toFixed(6)} ${manualSelectedPair} @ ${formatMoney(data.price)}`, 'success');
             setManualSelectedPair(null);
             setManualPairSearch('');
             setManualAmount(null);
