@@ -93,11 +93,35 @@ _CASH_CURRENCIES: set[str] = {
     "USD", "EUR", "GBP", "AUD", "CAD", "JPY", "CHF",  # fiat
 }
 
-# Fiat → approximate USD conversion (good enough for portfolio display).
+# Fiat → approximate USD conversion (used as base for cross-currency math).
 _FIAT_TO_USD: dict[str, float] = {
     "USD": 1.0, "EUR": 1.08, "GBP": 1.27, "AUD": 0.65,
     "CAD": 0.74, "JPY": 0.0067, "CHF": 1.13,
 }
+
+
+def _get_display_quote() -> str:
+    """Return the user's selected display/quote currency from config."""
+    try:
+        from ctrade.core.config_store import RuntimeConfigStore
+        if RuntimeConfigStore.is_initialized():
+            return RuntimeConfigStore.get().trading.default_quote_currency or "AUD"
+    except Exception:
+        pass
+    return "AUD"
+
+
+def _fiat_rate(from_currency: str, quote: str) -> float:
+    """Convert 1 unit of *from_currency* into *quote* currency.
+
+    Uses _FIAT_TO_USD as the bridge.  Stablecoins (USDT/USDC/…) are
+    treated as USD (rate 1.0 vs USD).
+    """
+    from_usd = _FIAT_TO_USD.get(from_currency, 1.0)  # stablecoins default 1.0
+    quote_usd = _FIAT_TO_USD.get(quote, 1.0)
+    if quote_usd == 0:
+        return 1.0
+    return from_usd / quote_usd
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1, "5m": 5, "15m": 15, "30m": 30,
@@ -1221,6 +1245,7 @@ class MarketDataProvider:
 
         Returns a dict compatible with the ``PortfolioResponse`` schema.
         """
+        quote = _get_display_quote()
         cash_value = 0.0
         positions_value = 0.0
         non_stable_count = 0
@@ -1231,19 +1256,20 @@ class MarketDataProvider:
         crypto_holdings: list[tuple[str, float, float]] = []
         for currency, amount in balances.items():
             if currency in _CASH_CURRENCIES:
-                rate = _FIAT_TO_USD.get(currency, 1.0)
+                rate = _fiat_rate(currency, quote)
                 cash_value += amount * rate
             else:
-                seed_price = _SEED_PRICES.get(
+                # Seed prices normalised to USD first, then converted to quote
+                seed_usd = _SEED_PRICES.get(
                     f"{currency}/USDT",
                     _SEED_PRICES.get(
                         f"{currency}/USD",
                         _SEED_PRICES.get(f"{currency}/AUD", 0) * _FIAT_TO_USD.get("AUD", 0.65),
                     ),
                 )
-                est_usd = amount * seed_price if seed_price > 0 else 0.0
-                if est_usd >= 0.01:
-                    crypto_holdings.append((currency, amount, est_usd))
+                est_quote = amount * seed_usd * _fiat_rate("USD", quote) if seed_usd > 0 else 0.0
+                if est_quote >= 0.01:
+                    crypto_holdings.append((currency, amount, est_quote))
 
         crypto_holdings.sort(key=lambda x: x[2], reverse=True)
 
@@ -1257,8 +1283,8 @@ class MarketDataProvider:
             exchange_id, len(crypto_holdings), cash_value,
         )
 
-        for i, (currency, amount, est_usd) in enumerate(crypto_holdings):
-            usd_value = est_usd
+        for i, (currency, amount, est_quote) in enumerate(crypto_holdings):
+            quote_value = est_quote
             price_source = "seed"
             if i < _MAX_LIVE_LOOKUPS:
                 try:
@@ -1270,38 +1296,41 @@ class MarketDataProvider:
                     if ticker is not None:
                         price = float(ticker.last_price)
                         price_source = f"live:{ticker.pair_symbol}"
-                        if ticker.pair_symbol.endswith("/AUD"):
-                            price *= _FIAT_TO_USD.get("AUD", 0.65)
-                            price_source += f"×AUD({_FIAT_TO_USD.get('AUD', 0.65)})"
-                        usd_value = amount * price
+                        # Convert live price to quote currency
+                        pair_quote = ticker.pair_symbol.split("/")[-1] if "/" in ticker.pair_symbol else "USD"
+                        rate = _fiat_rate(pair_quote, quote)
+                        price *= rate
+                        if rate != 1.0:
+                            price_source += f"×{pair_quote}→{quote}({rate:.4f})"
+                        quote_value = amount * price
                 except Exception:
                     pass
             else:
                 price_source = "seed(over-limit)"
 
             logger.info(
-                "[PORTFOLIO]   %s: amount=%.8f, usd=$%.2f, source=%s (exchange_id=%s)",
-                currency, amount, usd_value, price_source, exchange_id,
+                "[PORTFOLIO]   %s: amount=%.8f, %s=%.2f, source=%s (exchange_id=%s)",
+                currency, amount, quote, quote_value, price_source, exchange_id,
             )
 
-            if usd_value >= 0.01:
-                positions_value += usd_value
+            if quote_value >= 0.01:
+                positions_value += quote_value
                 non_stable_count += 1
 
         total_value = cash_value + positions_value
         logger.info(
-            "[PORTFOLIO] _price_balances result: total=$%.2f (cash=$%.2f + positions=$%.2f), exchange_id=%s",
-            total_value, cash_value, positions_value, exchange_id,
+            "[PORTFOLIO] _price_balances result: total=%.2f %s (cash=%.2f + positions=%.2f), exchange_id=%s",
+            total_value, quote, cash_value, positions_value, exchange_id,
         )
 
-        cash_bal_usd: dict[str, float] = {}
+        cash_bal_quote: dict[str, float] = {}
         for currency, amount in balances.items():
             if currency in _CASH_CURRENCIES:
-                rate = _FIAT_TO_USD.get(currency, 1.0)
-                cash_bal_usd[currency] = round(amount * rate, 2)
+                rate = _fiat_rate(currency, quote)
+                cash_bal_quote[currency] = round(amount * rate, 2)
 
         return {
-            "cash_balance": cash_bal_usd,
+            "cash_balance": cash_bal_quote,
             "total_value_usd": round(total_value, 2),
             "positions_value": round(positions_value, 2),
             "unrealized_pnl": 0.0,
@@ -1438,9 +1467,10 @@ class MarketDataProvider:
                 # can fail for coins ccxt doesn't recognise and fall back to
                 # stale seed prices).
                 if coinspot_aud_values:
-                    aud_to_usd = _FIAT_TO_USD.get("AUD", 0.65)
+                    quote = _get_display_quote()
+                    aud_to_quote = _fiat_rate("AUD", quote)
                     total_aud = sum(coinspot_aud_values.values())
-                    total_usd = total_aud * aud_to_usd
+                    total_quote = total_aud * aud_to_quote
                     non_stable = len(coinspot_aud_values)
 
                     # Build per-coin log for diagnostics
@@ -1449,28 +1479,28 @@ class MarketDataProvider:
                         key=lambda x: x[1],
                         reverse=True,
                     ):
-                        usd_val = aud_val * aud_to_usd
+                        quote_val = aud_val * aud_to_quote
                         logger.info(
-                            "[PORTFOLIO]   %s: amount=%.8f, aud=$%.2f, usd=$%.2f, "
+                            "[PORTFOLIO]   %s: amount=%.8f, aud=%.2f, %s=%.2f, "
                             "source=coinspot-native (exchange=%s)",
                             cur,
                             balances.get(cur, 0.0),
                             aud_val,
-                            usd_val,
+                            quote, quote_val,
                             ex_name,
                         )
 
                     # Extract cash/fiat currencies from balances (e.g. AUD)
-                    cash_bal_usd: dict[str, float] = {}
+                    cash_bal_quote: dict[str, float] = {}
                     for cur, amt in balances.items():
                         if cur in _CASH_CURRENCIES and amt > 0:
-                            rate = _FIAT_TO_USD.get(cur, 1.0)
-                            cash_bal_usd[cur] = round(amt * rate, 2)
+                            rate = _fiat_rate(cur, quote)
+                            cash_bal_quote[cur] = round(amt * rate, 2)
 
                     portfolio: dict[str, Any] = {
-                        "cash_balance": cash_bal_usd,
-                        "total_value_usd": round(total_usd, 2),
-                        "positions_value": round(total_usd, 2),
+                        "cash_balance": cash_bal_quote,
+                        "total_value_usd": round(total_quote, 2),
+                        "positions_value": round(total_quote, 2),
                         "unrealized_pnl": 0.0,
                         "realized_pnl": 0.0,
                         "daily_pnl": 0.0,
@@ -1479,8 +1509,8 @@ class MarketDataProvider:
                         "total_orders": 0,
                     }
                     logger.info(
-                        "[PORTFOLIO] CoinSpot native totals: AUD=$%.2f × %.4f = USD=$%.2f (%d coins)",
-                        total_aud, aud_to_usd, total_usd, non_stable,
+                        "[PORTFOLIO] CoinSpot native totals: AUD=%.2f × %.4f = %s=%.2f (%d coins)",
+                        total_aud, aud_to_quote, quote, total_quote, non_stable,
                     )
                 else:
                     ex_id_str = str(ex_info["id"])
