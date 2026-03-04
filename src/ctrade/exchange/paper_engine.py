@@ -548,7 +548,8 @@ class PaperEngine:
             from ctrade.exchange.market_data import MarketDataProvider
             market = MarketDataProvider.get_instance()
 
-            cash_usd = float(self._cash.get("USDT", Decimal("0")))
+            # Sum all cash in the actual quote currency (AUD for CoinSpot)
+            cash_usd = sum(float(v) for v in self._cash.values())
             positions_value = 0.0
             unrealized_pnl = 0.0
 
