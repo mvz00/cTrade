@@ -15,7 +15,8 @@ import {
   usePortfolio, useEngineStatus, useStartEngine, useStopEngine,
   useResetPaperEngine, useQuickBuy, useActivityLog, useClearActivity, useTicker,
 } from '@/api/hooks/useTrading';
-import { formatUSD, formatAUD, formatNumber, formatTime } from '@/lib/formatters';
+import { formatNumber, formatTime } from '@/lib/formatters';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWebSocket } from '@/api/hooks/useWebSocket';
 import {
@@ -24,7 +25,6 @@ import {
   Download, ChevronDown, ChevronUp, History, RotateCcw, ShoppingCart, Trash2,
 } from 'lucide-react';
 
-const USDT_TO_AUD = 1.55;
 const API_BASE = '/api/v1';
 
 const ACTIVITY_COLORS: Record<string, string> = {
@@ -80,6 +80,7 @@ function OutlookDot({ score, label }: { score: number; label: string }) {
 }
 
 export function TradingPage() {
+  const { formatMoney, quoteCurrency } = useCurrency();
   // --- WebSocket for live updates ---
   const queryClient = useQueryClient();
 
@@ -260,7 +261,7 @@ export function TradingPage() {
   async function handleManualBuy() {
     if (!manualSelectedPair) return;
     const amount = manualAmount || effectiveMaxBuy;
-    const ok = await confirm({ message: `Buy ${manualSelectedPair} for $${amount} USDT?`, confirmLabel: 'Buy', variant: 'primary' });
+    const ok = await confirm({ message: `Buy ${manualSelectedPair} for ${formatMoney(amount)}?`, confirmLabel: 'Buy', variant: 'primary' });
     if (!ok) return;
     quickBuy.mutate(
       { symbol: manualSelectedPair, amount_usdt: amount },
@@ -284,7 +285,7 @@ export function TradingPage() {
     <div>
       <PageHeader
         title="Trading"
-        description={isLive ? 'Live trading — real exchange balances' : 'Paper trading — $10K virtual balance'}
+        description={isLive ? 'Live trading — real exchange balances' : `Paper trading — ${formatMoney(10000)} virtual balance`}
         actions={
           <Badge variant={isLive ? 'danger' : 'warning'}>
             {isLive ? 'Live' : 'Paper'} Trading
@@ -452,12 +453,12 @@ export function TradingPage() {
                         <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
                       </td>
                       <td>{formatNumber(p.quantity, 6)}</td>
-                      <td>{formatUSD(p.entry_price)}</td>
-                      <td>{formatUSD(p.entry_price * p.quantity)}</td>
+                      <td>{formatMoney(p.entry_price)}</td>
+                      <td>{formatMoney(p.entry_price * p.quantity)}</td>
                       <td className="text-xs text-ct-text-dim">
-                        {p.stop_loss ? formatUSD(p.stop_loss) : '—'}
+                        {p.stop_loss ? formatMoney(p.stop_loss) : '—'}
                         {' / '}
-                        {p.take_profit ? formatUSD(p.take_profit) : '—'}
+                        {p.take_profit ? formatMoney(p.take_profit) : '—'}
                       </td>
                       <td className="text-xs text-ct-text-muted">
                         {estimateTradeTime(
@@ -467,7 +468,7 @@ export function TradingPage() {
                         )}
                       </td>
                       <td className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                        {formatUSD(p.unrealized_pnl ?? 0)}
+                        {formatMoney(p.unrealized_pnl ?? 0)}
                         <span className="text-xs text-ct-text-dim ml-1">
                           ({(p.unrealized_pnl_pct ?? 0).toFixed(2)}%)
                         </span>
@@ -516,7 +517,7 @@ export function TradingPage() {
             min={1}
             max={100000}
             step={10}
-            suffix="USDT"
+            suffix={quoteCurrency}
           />
           <NumberInput
             label="Max Concurrent Trades"
@@ -570,13 +571,13 @@ export function TradingPage() {
             onClick={async () => {
               const ok = await confirm({
                 title: 'Reset Paper Trading',
-                message: 'Reset paper trading to $10,000? This clears all orders, positions, and history.',
+                message: `Reset paper trading to ${formatMoney(10000)}? This clears all orders, positions, and history.`,
                 confirmLabel: 'Reset',
                 variant: 'danger',
               });
               if (ok) {
                 resetPaper.mutate(undefined, {
-                  onSuccess: () => toast('Paper trading reset to $10,000', 'success'),
+                  onSuccess: () => toast(`Paper trading reset to ${formatMoney(10000)}`, 'success'),
                   onError: (err) => toast(err.message, 'error'),
                 });
               }
@@ -600,10 +601,7 @@ export function TradingPage() {
             <span className="text-xs text-ct-text-muted uppercase">Portfolio</span>
           </div>
           <div className="text-lg font-semibold text-ct-text">
-            {formatUSD(portfolio?.total_value_usd ?? 0)}
-          </div>
-          <div className="text-xs text-ct-text-dim">
-            {formatAUD((portfolio?.total_value_usd ?? 0) * USDT_TO_AUD)}
+            {formatMoney(portfolio?.total_value_usd ?? 0)}
           </div>
         </Card>
         <Card>
@@ -614,7 +612,7 @@ export function TradingPage() {
             <span className="text-xs text-ct-text-muted uppercase">Daily P&L</span>
           </div>
           <div className={`text-lg font-semibold ${(portfolio?.daily_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}`}>
-            {formatUSD(portfolio?.daily_pnl ?? 0)}
+            {formatMoney(portfolio?.daily_pnl ?? 0)}
           </div>
         </Card>
         <Card>
@@ -632,7 +630,7 @@ export function TradingPage() {
             <span className="text-xs text-ct-text-muted uppercase">Cash</span>
           </div>
           <div className="text-lg font-semibold text-ct-text">
-            {formatUSD(Object.values(portfolio?.cash_balance ?? {}).reduce((s, v) => s + v, 0))}
+            {formatMoney(Object.values(portfolio?.cash_balance ?? {}).reduce((s, v) => s + v, 0))}
           </div>
         </Card>
         <Card>
@@ -672,7 +670,7 @@ export function TradingPage() {
                     setShowManualDropdown(true);
                   }}
                   onFocus={() => { if (!manualSelectedPair) setShowManualDropdown(true); }}
-                  placeholder="Search pair (e.g. BTC/USDT)"
+                  placeholder={`Search pair (e.g. BTC/${quoteCurrency})`}
                   className="flex-1 bg-transparent text-xs text-ct-text outline-none placeholder:text-ct-text-dim"
                 />
                 {manualSelectedPair && (
@@ -708,7 +706,7 @@ export function TradingPage() {
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-ct-text-muted">Price:</span>
                   <span className="font-mono text-ct-text">
-                    {manualTicker ? formatUSD(manualTicker.last_price) : 'Loading...'}
+                    {manualTicker ? formatMoney(manualTicker.last_price) : 'Loading...'}
                   </span>
                 </div>
                 <NumberInput
@@ -718,7 +716,7 @@ export function TradingPage() {
                   min={1}
                   max={100000}
                   step={10}
-                  suffix="USDT"
+                  suffix={quoteCurrency}
                 />
                 <Button
                   onClick={handleManualBuy}
@@ -890,11 +888,11 @@ export function TradingPage() {
                       <td>
                         <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge>
                       </td>
-                      <td>{formatUSD(p.entry_price)}</td>
-                      <td>{p.exit_price ? formatUSD(p.exit_price) : '—'}</td>
+                      <td>{formatMoney(p.entry_price)}</td>
+                      <td>{p.exit_price ? formatMoney(p.exit_price) : '—'}</td>
                       <td>{formatNumber(p.quantity, 6)}</td>
                       <td className={(p.realized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
-                        {formatUSD(p.realized_pnl ?? 0)}
+                        {formatMoney(p.realized_pnl ?? 0)}
                       </td>
                       <td className={(p.realized_pnl_pct ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>
                         {(p.realized_pnl_pct ?? 0).toFixed(2)}%

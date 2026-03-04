@@ -44,7 +44,7 @@ class TradingSettings(BaseModel):
     """Trading execution settings."""
 
     mode: Literal["paper", "live"] = "paper"
-    default_quote_currency: str = "USDT"
+    default_quote_currency: str = "AUD"
     max_open_positions: int = 5
     max_order_usdt: float = 100.0
     order_timeout_seconds: int = 60

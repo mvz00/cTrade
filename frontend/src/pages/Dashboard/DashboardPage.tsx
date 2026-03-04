@@ -9,7 +9,8 @@ import { Spinner } from '@/components/ui/Spinner';
 import { EquityCurveChart } from '@/components/charts/EquityCurveChart';
 import { PositionPriceChart } from '@/components/charts/PositionPriceChart';
 import { PortfolioDonut } from '@/components/charts/PortfolioDonut';
-import { formatUSD, formatRelative } from '@/lib/formatters';
+import { formatRelative } from '@/lib/formatters';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import { REFETCH_INTERVALS } from '@/lib/constants';
@@ -46,6 +47,7 @@ const PRICE_RANGE_PARAMS: Record<PriceRange, { timeframe: string; limit: number 
 };
 
 export function DashboardPage() {
+  const { formatMoney } = useCurrency();
   const queryClient = useQueryClient();
   const [historyRange, setHistoryRange] = useState<HistoryRange>('7d');
   const [priceRange, setPriceRange] = useState<PriceRange>('24h');
@@ -108,11 +110,11 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <Card>
           <div className="flex items-center gap-3 mb-3"><div className="p-2 rounded-lg bg-ct-accent/10"><DollarSign size={18} className="text-ct-accent" /></div><CardTitle>Portfolio Value</CardTitle></div>
-          <CardValue>{formatUSD(summary?.total_value_usd ?? 10000)}</CardValue>
+          <CardValue>{formatMoney(summary?.total_value_usd ?? 10000)}</CardValue>
         </Card>
         <Card>
           <div className="flex items-center gap-3 mb-3"><div className="p-2 rounded-lg bg-ct-blue/10"><TrendingUp size={18} className="text-ct-blue" /></div><CardTitle>Daily P&L</CardTitle></div>
-          <CardValue className={(summary?.daily_pnl ?? 0) > 0 ? 'text-ct-green' : (summary?.daily_pnl ?? 0) < 0 ? 'text-ct-red' : ''}>{formatUSD(summary?.daily_pnl ?? 0)}</CardValue>
+          <CardValue className={(summary?.daily_pnl ?? 0) > 0 ? 'text-ct-green' : (summary?.daily_pnl ?? 0) < 0 ? 'text-ct-red' : ''}>{formatMoney(summary?.daily_pnl ?? 0)}</CardValue>
         </Card>
         <Card>
           <div className="flex items-center gap-3 mb-3"><div className="p-2 rounded-lg bg-ct-yellow/10"><Layers size={18} className="text-ct-yellow" /></div><CardTitle>Open Positions</CardTitle></div>
@@ -240,7 +242,7 @@ export function DashboardPage() {
               {(positions || []).slice(0, 5).map(p => (
                 <div key={p.id} className="flex items-center justify-between py-2 px-2 rounded bg-ct-bg-hover text-sm">
                   <div><span className="font-mono">{p.pair_symbol}</span> <Badge variant={p.side === 'long' ? 'success' : 'danger'}>{p.side}</Badge></div>
-                  <span className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>{formatUSD(p.unrealized_pnl ?? 0)}</span>
+                  <span className={(p.unrealized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>{formatMoney(p.unrealized_pnl ?? 0)}</span>
                 </div>
               ))}
             </div>
@@ -282,9 +284,9 @@ export function DashboardPage() {
                   <tr key={t.id} className="border-b border-ct-border/50">
                     <td className="py-2 font-mono">{t.pair_symbol}</td>
                     <td><Badge variant={t.side === 'long' ? 'success' : 'danger'}>{t.side}</Badge></td>
-                    <td>{formatUSD(t.entry_price)}</td>
-                    <td>{t.exit_price ? formatUSD(t.exit_price) : '—'}</td>
-                    <td className={(t.realized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>{formatUSD(t.realized_pnl ?? 0)}</td>
+                    <td>{formatMoney(t.entry_price)}</td>
+                    <td>{t.exit_price ? formatMoney(t.exit_price) : '—'}</td>
+                    <td className={(t.realized_pnl ?? 0) >= 0 ? 'text-ct-green' : 'text-ct-red'}>{formatMoney(t.realized_pnl ?? 0)}</td>
                     <td className="text-ct-text-dim">{t.closed_at ? formatRelative(t.closed_at) : '—'}</td>
                   </tr>
                 ))}

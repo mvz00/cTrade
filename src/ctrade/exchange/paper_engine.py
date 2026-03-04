@@ -82,7 +82,7 @@ class PaperEngine:
     def _detect_quote_currency() -> str:
         """Detect the primary quote currency from configured exchanges.
 
-        Returns "AUD" for CoinSpot, "USDT" as default fallback.
+        Returns "AUD" for CoinSpot, "AUD" as default fallback.
         Called during __init__ and reset_to_defaults so the paper engine
         starts with cash in the correct currency for the user's exchange.
         """
@@ -95,7 +95,7 @@ class PaperEngine:
                         return "AUD"
         except Exception:
             pass
-        return "USDT"
+        return "AUD"
 
     async def reset_to_defaults(self) -> None:
         """Wipe all paper-trading state and restore $10K balance.
@@ -266,7 +266,7 @@ class PaperEngine:
                 fee = cost * Decimal("0.001")  # 0.1% fee
 
                 # Check balance
-                quote = symbol.split("/")[1] if "/" in symbol else "USDT"
+                quote = symbol.split("/")[1] if "/" in symbol else "AUD"
                 base = symbol.split("/")[0] if "/" in symbol else symbol
 
                 # Auto-seed: if the engine has only USDT (fresh start or

@@ -7,6 +7,7 @@ import { useTopGainers, useTopLosers, useCMCFeedStatus } from '@/api/hooks/useSc
 import { useAddPair } from '@/api/hooks/useTrading';
 import { useToast } from '@/components/ui/Toast';
 import { formatNumber } from '@/lib/formatters';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import { TrendingUp, TrendingDown, Flame, Plus, Wifi, WifiOff } from 'lucide-react';
 import type { ScreenerCoin } from '@/api/types';
 
@@ -40,7 +41,7 @@ function MomentumBar({ score }: { score: number | null }) {
   );
 }
 
-function CoinRow({ coin, onAdd }: { coin: ScreenerCoin; onAdd: (symbol: string) => void }) {
+function CoinRow({ coin, onAdd, quoteCurrency }: { coin: ScreenerCoin; onAdd: (symbol: string) => void; quoteCurrency: string }) {
   return (
     <tr className="border-b border-ct-border/30 hover:bg-ct-bg-hover/50">
       <td className="py-2 px-3 text-xs text-ct-text-dim">{coin.cmc_rank}</td>
@@ -58,7 +59,7 @@ function CoinRow({ coin, onAdd }: { coin: ScreenerCoin; onAdd: (symbol: string) 
       <td className="py-2 px-3"><MomentumBar score={coin.momentum_score} /></td>
       <td className="py-2 px-1">
         <button
-          onClick={() => onAdd(`${coin.symbol}/USDT`)}
+          onClick={() => onAdd(`${coin.symbol}/${quoteCurrency}`)}
           className="p-1 rounded hover:bg-ct-accent/20 text-ct-text-dim hover:text-ct-accent transition-colors"
           title="Add to watchlist"
         >
@@ -69,7 +70,7 @@ function CoinRow({ coin, onAdd }: { coin: ScreenerCoin; onAdd: (symbol: string) 
   );
 }
 
-function CoinTable({ coins, onAdd, emptyMessage }: { coins: ScreenerCoin[]; onAdd: (s: string) => void; emptyMessage: string }) {
+function CoinTable({ coins, onAdd, emptyMessage, quoteCurrency }: { coins: ScreenerCoin[]; onAdd: (s: string) => void; emptyMessage: string; quoteCurrency: string }) {
   if (coins.length === 0) {
     return <p className="text-sm text-ct-text-dim py-6 text-center">{emptyMessage}</p>;
   }
@@ -90,7 +91,7 @@ function CoinTable({ coins, onAdd, emptyMessage }: { coins: ScreenerCoin[]; onAd
           </tr>
         </thead>
         <tbody>
-          {coins.map(c => <CoinRow key={c.symbol} coin={c} onAdd={onAdd} />)}
+          {coins.map(c => <CoinRow key={c.symbol} coin={c} onAdd={onAdd} quoteCurrency={quoteCurrency} />)}
         </tbody>
       </table>
     </div>
@@ -98,6 +99,7 @@ function CoinTable({ coins, onAdd, emptyMessage }: { coins: ScreenerCoin[]; onAd
 }
 
 export function ScreenerPage() {
+  const { quoteCurrency } = useCurrency();
   const [gainersLimit] = useState(15);
   const [losersLimit] = useState(10);
   const { data: gainersData, isLoading: loadingGainers } = useTopGainers(gainersLimit);
@@ -175,6 +177,7 @@ export function ScreenerPage() {
                 coins={gainersData?.coins ?? []}
                 onAdd={handleAddPair}
                 emptyMessage="No data available yet"
+                quoteCurrency={quoteCurrency}
               />
             )}
           </Card>
@@ -190,6 +193,7 @@ export function ScreenerPage() {
                 coins={losersData?.coins ?? []}
                 onAdd={handleAddPair}
                 emptyMessage="No data available yet"
+                quoteCurrency={quoteCurrency}
               />
             )}
           </Card>

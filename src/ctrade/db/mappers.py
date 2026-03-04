@@ -114,7 +114,7 @@ class PairResolver:
         exchange_id = await self.get_exchange_id("paper")
         parts = symbol.split("/")
         base = parts[0] if len(parts) >= 2 else symbol
-        quote = parts[1] if len(parts) >= 2 else "USDT"
+        quote = parts[1] if len(parts) >= 2 else "AUD"
 
         pair = TradingPairModel(
             exchange_id=exchange_id,

@@ -21,7 +21,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { RiskConfig } from '@/api/types';
 
-const QUOTE_CURRENCY_OPTIONS = ['USDT', 'USDC', 'BTC', 'AUD', 'USD', 'EUR'];
+const QUOTE_CURRENCY_OPTIONS = ['AUD', 'USDT', 'USDC', 'BTC', 'USD', 'EUR'];
 
 function QuoteCurrencyPicker({
   selected,
@@ -44,7 +44,7 @@ function QuoteCurrencyPicker({
   return (
     <div className="space-y-1.5">
       <label className="block text-sm font-medium text-ct-text-muted">
-        Quote Currencies<InfoTooltip text="Only trading pairs quoted in these currencies will be considered (e.g. BTC/USDT)." />
+        Quote Currencies<InfoTooltip text="Only trading pairs quoted in these currencies will be considered (e.g. BTC/AUD)." />
       </label>
       <div className="flex flex-wrap gap-2">
         {QUOTE_CURRENCY_OPTIONS.map((cur) => (
@@ -199,7 +199,7 @@ export function ExchangeSection() {
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
   const [passphrase, setPassphrase] = useState('');
-  const [quoteCurrencies, setQuoteCurrencies] = useState<string[]>(['USDT']);
+  const [quoteCurrencies, setQuoteCurrencies] = useState<string[]>(['AUD']);
   const [maxPortfolioPct, setMaxPortfolioPct] = useState(100);
   const [riskOverrides, setRiskOverrides] = useState<Partial<RiskConfig>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -209,7 +209,7 @@ export function ExchangeSection() {
   const [editApiKey, setEditApiKey] = useState('');
   const [editApiSecret, setEditApiSecret] = useState('');
   const [editPassphrase, setEditPassphrase] = useState('');
-  const [editQuoteCurrencies, setEditQuoteCurrencies] = useState<string[]>(['USDT']);
+  const [editQuoteCurrencies, setEditQuoteCurrencies] = useState<string[]>(['AUD']);
   const [editMaxPortfolioPct, setEditMaxPortfolioPct] = useState(100);
   const [editRiskOverrides, setEditRiskOverrides] = useState<Partial<RiskConfig>>({});
 
@@ -223,7 +223,7 @@ export function ExchangeSection() {
     setApiKey('');
     setApiSecret('');
     setPassphrase('');
-    setQuoteCurrencies(['USDT']);
+    setQuoteCurrencies(['AUD']);
     setMaxPortfolioPct(100);
     setRiskOverrides({});
     setShowForm(false);
@@ -234,7 +234,7 @@ export function ExchangeSection() {
     setEditApiKey('');
     setEditApiSecret('');
     setEditPassphrase('');
-    setEditQuoteCurrencies(['USDT']);
+    setEditQuoteCurrencies(['AUD']);
     setEditMaxPortfolioPct(100);
     setEditRiskOverrides({});
   }
@@ -270,7 +270,7 @@ export function ExchangeSection() {
       setEditApiKey('');
       setEditApiSecret('');
       setEditPassphrase('');
-      setEditQuoteCurrencies(ex?.quote_currencies ?? ['USDT']);
+      setEditQuoteCurrencies(ex?.quote_currencies ?? ['AUD']);
       setEditMaxPortfolioPct(Math.round((ex?.max_portfolio_pct ?? 1) * 100));
       setEditRiskOverrides(ex?.risk_overrides ?? {});
     }
@@ -284,7 +284,7 @@ export function ExchangeSection() {
 
     // Always send settings fields so they can be updated independently of credentials
     const ex = exchanges.find((e) => e.id === id);
-    const origQuote = ex?.quote_currencies ?? ['USDT'];
+    const origQuote = ex?.quote_currencies ?? ['AUD'];
     const origMaxPct = Math.round((ex?.max_portfolio_pct ?? 1) * 100);
     const origOverrides = ex?.risk_overrides ?? {};
 
@@ -360,7 +360,7 @@ export function ExchangeSection() {
     (() => {
       const ex = exchanges.find((e) => e.id === editingId);
       if (!ex) return false;
-      const quotesChanged = JSON.stringify(editQuoteCurrencies.sort()) !== JSON.stringify([...(ex.quote_currencies ?? ['USDT'])].sort());
+      const quotesChanged = JSON.stringify(editQuoteCurrencies.sort()) !== JSON.stringify([...(ex.quote_currencies ?? ['AUD'])].sort());
       const maxPctChanged = editMaxPortfolioPct !== Math.round((ex.max_portfolio_pct ?? 1) * 100);
       const overridesChanged = JSON.stringify(editRiskOverrides) !== JSON.stringify(ex.risk_overrides ?? {});
       return quotesChanged || maxPctChanged || overridesChanged;

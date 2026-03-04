@@ -4,7 +4,8 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { useAlerts, useCreateAlert, useDeleteAlert, useToggleAlert, useAlertHistory } from '@/api/hooks/useAlerts';
 import { usePairs } from '@/api/hooks/useTrading';
-import { formatRelative, formatUSD, formatNumber } from '@/lib/formatters';
+import { formatRelative, formatNumber } from '@/lib/formatters';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import {
   Bell, BellPlus, History, Trash2, ToggleLeft, ToggleRight,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ const ALERT_TYPES = [
 ];
 
 export function AlertsPage() {
+  const { formatMoney, quoteCurrency } = useCurrency();
   const { data: alerts } = useAlerts();
   const { data: history } = useAlertHistory();
   const { data: pairs } = usePairs();
@@ -27,7 +29,7 @@ export function AlertsPage() {
   const toggleAlert = useToggleAlert();
 
   const [alertType, setAlertType] = useState('price_above');
-  const [symbol, setSymbol] = useState('BTC/USDT');
+  const [symbol, setSymbol] = useState('BTC/AUD');
   const [value, setValue] = useState(70000);
   const [message, setMessage] = useState('');
 
@@ -85,7 +87,7 @@ export function AlertsPage() {
                     <div className="text-xs text-ct-text-dim">
                       {alert.alert_type.startsWith('price_') && `$${formatNumber(alert.value, 2)}`}
                       {alert.alert_type.startsWith('signal_') && `Confidence >= ${(alert.value * 100).toFixed(0)}%`}
-                      {alert.alert_type.startsWith('pnl_') && `${formatUSD(alert.value)}`}
+                      {alert.alert_type.startsWith('pnl_') && `${formatMoney(alert.value)}`}
                       {alert.message && ` — ${alert.message}`}
                     </div>
                   </div>
@@ -150,9 +152,9 @@ export function AlertsPage() {
                 ))}
                 {(!pairs || pairs.length === 0) && (
                   <>
-                    <option value="BTC/USDT">BTC/USDT</option>
-                    <option value="ETH/USDT">ETH/USDT</option>
-                    <option value="SOL/USDT">SOL/USDT</option>
+                    <option value={`BTC/${quoteCurrency}`}>{`BTC/${quoteCurrency}`}</option>
+                    <option value={`ETH/${quoteCurrency}`}>{`ETH/${quoteCurrency}`}</option>
+                    <option value={`SOL/${quoteCurrency}`}>{`SOL/${quoteCurrency}`}</option>
                   </>
                 )}
               </select>
@@ -239,9 +241,9 @@ export function AlertsPage() {
                     </td>
                     <td className="py-2 pr-4 font-mono">{h.symbol}</td>
                     <td className="py-2 pr-4">
-                      {h.alert_type.startsWith('price_') && formatUSD(h.triggered_value)}
+                      {h.alert_type.startsWith('price_') && formatMoney(h.triggered_value)}
                       {h.alert_type.startsWith('signal_') && `${(h.triggered_value * 100).toFixed(0)}%`}
-                      {h.alert_type.startsWith('pnl_') && formatUSD(h.triggered_value)}
+                      {h.alert_type.startsWith('pnl_') && formatMoney(h.triggered_value)}
                     </td>
                     <td className="py-2 pr-4 text-ct-text-dim max-w-xs truncate">{h.message}</td>
                     <td className="py-2 text-ct-text-dim">{formatRelative(h.triggered_at)}</td>

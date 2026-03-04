@@ -21,7 +21,7 @@ class TradingModeResponse(BaseModel):
     mode: str
     max_order_usdt: float = 100.0
     max_open_positions: int = 5
-    default_quote_currency: str = "USDT"
+    default_quote_currency: str = "AUD"
     order_timeout_seconds: int = 60
 
 
@@ -154,7 +154,7 @@ class ExchangeResponse(BaseModel):
     exchange_type: str
     is_active: bool
     created_at: str
-    quote_currencies: list[str] = ["USDT"]
+    quote_currencies: list[str] = ["AUD"]
     max_portfolio_pct: float = 1.0
     risk_overrides: dict[str, float] = {}
 
