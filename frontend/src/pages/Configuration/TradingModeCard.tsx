@@ -1,9 +1,19 @@
 import { useTradingMode, useUpdateTradingMode } from '@/api/hooks/useConfig';
 import { Card, CardTitle } from '@/components/ui/Card';
+import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { useToast } from '@/components/ui/Toast';
 import { Sliders } from 'lucide-react';
 import { useState } from 'react';
+
+const CURRENCY_OPTIONS = [
+  { value: 'AUD', label: 'AUD — Australian Dollar' },
+  { value: 'USD', label: 'USD — US Dollar' },
+  { value: 'USDT', label: 'USDT — Tether' },
+  { value: 'USDC', label: 'USDC — USD Coin' },
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'GBP', label: 'GBP — British Pound' },
+];
 
 export function TradingModeCard() {
   const { data: mode } = useTradingMode();
@@ -12,6 +22,7 @@ export function TradingModeCard() {
   const [confirming, setConfirming] = useState(false);
 
   const isLive = mode?.mode === 'live';
+  const currentCurrency = mode?.default_quote_currency ?? 'AUD';
 
   function handleToggle(checked: boolean) {
     if (checked && !confirming) {
@@ -47,6 +58,24 @@ export function TradingModeCard() {
         activeLabel="Live"
         tooltip="Paper mode simulates trades with virtual funds. Live mode executes real trades on your connected exchange."
       />
+
+      <div className="mt-4">
+        <Select
+          label="Display Currency"
+          value={currentCurrency}
+          onChange={(val) =>
+            updateMode.mutate(
+              { default_quote_currency: val },
+              {
+                onSuccess: () => toast(`Currency set to ${val}`, 'success'),
+                onError: (err) => toast(err.message, 'error'),
+              }
+            )
+          }
+          options={CURRENCY_OPTIONS}
+          tooltip="The currency used for displaying values and creating trading pairs across the app."
+        />
+      </div>
 
       {confirming && (
         <div className="mt-3 p-3 rounded-lg border border-ct-red/30 bg-ct-red/5">
