@@ -741,15 +741,23 @@ class LiveEngine:
                         ticker = await market._try_ccxt_ticker(symbol.replace("/USDT", "/USD"))
                 if ticker:
                     self._live_prices[symbol] = float(ticker.last_price)
-            except Exception:
-                logger.debug("Could not refresh price for %s", symbol)
+            except Exception as exc:
+                logger.warning("Could not refresh price for %s: %s", symbol, exc)
 
     def _record_equity_snapshot(self) -> None:
         """Record a portfolio equity snapshot (call after order fills)."""
         positions_value = 0.0
         for pos in self._positions:
             if pos.status == PositionStatus.OPEN:
-                price = self._live_prices.get(pos.pair_symbol, float(pos.entry_price))
+                cached = self._live_prices.get(pos.pair_symbol)
+                if cached is not None:
+                    price = cached
+                else:
+                    from ctrade.exchange.market_data import MarketDataProvider
+                    try:
+                        price = MarketDataProvider.get_instance().get_current_price(pos.pair_symbol)
+                    except Exception:
+                        price = float(pos.entry_price)
                 positions_value += float(pos.quantity) * price
 
         # We don't track cash for live — total comes from exchange
@@ -787,9 +795,21 @@ class LiveEngine:
                     if cached is not None:
                         current = Decimal(str(cached))
                     else:
-                        # Cache not yet populated — use entry price (P&L = 0)
-                        # until the next refresh cycle fills it.
-                        current = p.entry_price
+                        # Cache not populated — try MarketDataProvider as
+                        # fallback (has its own ticker cache + seed prices)
+                        # instead of using entry_price which always gives 0 P&L.
+                        from ctrade.exchange.market_data import MarketDataProvider
+                        try:
+                            market = MarketDataProvider.get_instance()
+                            fallback_price = market.get_current_price(p.pair_symbol)
+                            current = Decimal(str(fallback_price))
+                            logger.debug(
+                                "P&L fallback for %s: using MarketDataProvider price %.4f "
+                                "(live_prices cache miss)",
+                                p.pair_symbol, fallback_price,
+                            )
+                        except Exception:
+                            current = p.entry_price
                     if p.side == PositionSide.LONG:
                         unrealized = (current - p.entry_price) * p.quantity
                     else:

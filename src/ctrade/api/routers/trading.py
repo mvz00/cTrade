@@ -264,8 +264,8 @@ async def list_positions(
     if isinstance(engine, LiveEngine):
         try:
             await engine.refresh_live_prices()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("refresh_live_prices failed: %s", exc)
 
     positions = engine.get_positions(status=status)
     return [PositionResponse(**p) for p in positions]
